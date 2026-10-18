@@ -19,6 +19,7 @@
     "e2e:browser:columns": "node scripts/e2e-level39-columns.mjs",
     "e2e:browser:scene38": "node scripts/e2e-browser-scene38.mjs",
     "e2e:browser:scc-restored": "node scripts/e2e-browser-scc-restored.mjs",
+    "e2e:browser:fault": "node scripts/e2e-browser-fault.mjs",
     "e2e:browser:all": "node scripts/e2e-browser-all.mjs",
     "e2e:browser:level39-transitions": "node scripts/e2e-browser-level39-transitions.mjs",
     "e2e:browser:catalog": "node scripts/e2e-browser-catalog.mjs",

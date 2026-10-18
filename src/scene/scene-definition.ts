@@ -1,6 +1,6 @@
 import { decodeMult, type MultFile, type MultObject } from '../mult/decoder';
 import { parseAnimationDeclarations, AnimationPlayer } from '../animation/player';
-import { parseFclickBindings } from '../scc/runtime';
+import { parseFaultLists, parseFclickBindings, type FaultList } from '../scc/runtime';
 import { parseSceneDeclarations, parseFrameDepthEvents, type FrameDepthEvent, type SceneObjectDeclaration } from '../navigation/depth-sort';
 import type { NavigationMask } from '../navigation/router';
 import type { SccPortal } from '../scc/runtime';
@@ -27,6 +27,8 @@ export type SceneDefinition = {
   masks: Map<string, NavigationMask>;
   initialMaskPath: string;
   completionEvents?: Map<string, string>;
+  /** Visit-scoped Fault declarations in source order; names are intentionally not coalesced. */
+  faultLists: FaultList[];
   focus: readonly [number, number, number];
   portals: SccPortal[];
   objects: Map<string, SceneObjectDeclaration>;
@@ -137,6 +139,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
   const declarationSource = [...includeSources, scc].join('\n');
   const initialMaskPath = /^\s*Mask\s+(\S+)/im.exec(scc)?.[1] ?? '';
   const declarations = parseSceneDeclarations(declarationSource);
+  const faultParse = parseFaultLists(scc, id);
   const rates = parseAnimationDeclarations(...rateSources);
   const warnings: string[] = [];
   const animations = new Map<string, SceneAnimation>();
@@ -182,6 +185,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     masks: new Map([...(input.masks ?? new Map()).entries()].map(([path, value]) => [normalizeExternalPath(path), value])),
     initialMaskPath: normalizeExternalPath(initialMaskPath),
     completionEvents: parseFclickBindings(declarationSource),
+    faultLists: faultParse.lists,
     focus: parseFocus(scc),
     portals: parsePortals(scc),
     objects: declarations.objects,
@@ -193,7 +197,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     layoutAnimation,
     layout,
     externalImages,
-    warnings,
+    warnings: [...warnings, ...faultParse.diagnostics],
     audioEvents: parseFrameSoundEvents(declarationSource),
     audioResources: input.audioResources ?? {},
     audioDurations: input.audioDurations ?? {},

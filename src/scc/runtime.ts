@@ -21,6 +21,8 @@ export type SccCommand =
   // Level/Goport/Lstate are implemented with callbacks supplied by SceneLoader.
 export type SccProgram = { caseIndex: number; commands: SccCommand[] };
 export type SccHandler = { itemId: number; event: string; stateObject: string; stateScene: number; programs: Map<number, SccProgram> };
+export type FaultList = { objectName: string; voices: string[]; line: number };
+export type FaultParseResult = { lists: FaultList[]; diagnostics: string[] };
 export type SccPortal = { direction: number; x: number; y: number };
 export type SccHost = {
   pathActive(): boolean;
@@ -48,9 +50,64 @@ export type SccHost = {
   readState?(name: string, scene?: number): number;
   writeState?(name: string, value: number): void;
 };
-type ProgramState = { program: SccProgram; active: boolean; waiting: boolean; pc: number; waitName?: string };
+type ProgramState = { program: SccProgram; active: boolean; waiting: boolean; pc: number; waitName?: string; suppressSetxy?: boolean };
 
 const int = (value: string) => Number.parseInt(value, 10);
+
+/** Original biased rand15 selection (0..32767), exposed for deterministic integration tests. */
+export function selectFaultVoiceIndex(count: number, rand15: number): number | undefined {
+  if (!Number.isInteger(count) || count <= 0 || !Number.isInteger(rand15) || rand15 < 0 || rand15 > 0x7fff) return undefined;
+  return Math.min(Math.floor((rand15 * count + 0x3fff) / 0x7fff), count - 1);
+}
+
+/** Parse top-level visit declarations; paths may continue on following physical lines. */
+export function parseFaultLists(source: string, sceneId?: number): FaultParseResult {
+  const lines = source.split(/\r?\n/);
+  const lists: FaultList[] = [], diagnostics: string[] = [];
+  let previousCount: number | undefined;
+  const topLevel = /^(?:Click\s|Fault\s|Animc?\s|Object\s|Active\s|Light\s|Back\s|Mask\s|Portal\s|Focus\s|Inc\s|Startlevel\b|Sound\s|Fram\s|Repeat\b|State\s|Block\b|Ublock\b|Cursor\s|Setmsk\s|Setbck\s|Setbcr\b|Shift\s|Setmap\s|Setzon\s|Egame\b|SclipW\s|Smusic\s)/i;
+  for (let i = 0; i < lines.length; i++) {
+    const match = /^\s*Fault\s+(\S+)(?:\s+(\S+))?/i.exec(lines[i]);
+    if (!match) continue;
+    const declarationLine = i + 1;
+    const name = match[1];
+    let count: number, pathTokens: string[] = [];
+    const countToken = match[2];
+    const lineTokens = lines[i].trim().split(/\s+/);
+    let remaining = lineTokens.slice(2);
+    if (countToken && /^\d+$/.test(countToken)) {
+      count = Number(countToken);
+      remaining = lineTokens.slice(3);
+      previousCount = count;
+    } else if (sceneId === 17 && i + 1 === 127 && name === 'New_janitor1' && previousCount === 1 && countToken) {
+      // DERIVED compatibility for the single corpus line whose failed %d scan
+      // reuses the preceding local count in the original parser.
+      count = previousCount;
+      remaining = [countToken];
+      diagnostics.push(`Level17.scc:127 Fault New_janitor1 uses derived scanner-state compatibility (count=${count})`);
+    } else {
+      diagnostics.push(`line ${i + 1}: Fault ${name} has invalid or missing count`);
+      continue;
+    }
+    if (!Number.isSafeInteger(count) || count < 1 || count > 10) {
+      diagnostics.push(`line ${i + 1}: Fault ${name} count ${count} is outside the safe supported range 1..10`);
+      continue;
+    }
+    pathTokens.push(...remaining);
+    while (pathTokens.length < count && i + 1 < lines.length) {
+      const next = lines[i + 1].trim();
+      if (!next || topLevel.test(next)) break;
+      i++;
+      pathTokens.push(...next.split(/\s+/));
+    }
+    if (pathTokens.length < count) {
+      diagnostics.push(`line ${i + 1}: Fault ${name} declares ${count} voices but only ${pathTokens.length} path(s) are present`);
+      continue;
+    }
+    lists.push({ objectName: name, voices: pathTokens.slice(0, count), line: declarationLine });
+  }
+  return { lists, diagnostics };
+}
 
 /** `Start <anim> Fclick <event>` is a load-time property in the original parser. */
 export function parseFclickBindings(source: string): Map<string, string> {
@@ -123,6 +180,15 @@ export class SccRuntime {
   readonly handlers: SccHandler[];
   readonly fclickBindings: Map<string, string>;
   readonly programs: ProgramState[] = [];
+  private readonly syntheticFaultProgram: SccProgram = { caseIndex: 0, commands: [
+    { op: 'Goto', x: 0, y: 0 }, { op: 'Setxy', x: 0, y: 0 },
+    { op: 'StartW', name: 'Speak' }, { op: 'Setxy', x: 0, y: 0 },
+  ] };
+  /** Original loader shape: all 50 Case slots share one synthetic Program. */
+  private readonly syntheticFaultHandler: SccHandler = {
+    itemId: 0, event: 'Fault', stateObject: 'Interface', stateScene: -1,
+    programs: new Map(Array.from({ length: 50 }, (_, index) => [index, this.syntheticFaultProgram] as const)),
+  };
   /** Game-session zone written by `Setzon`; owned by SceneLoader when a host provides it. */
   zone = 0;
   busy = false;
@@ -136,6 +202,18 @@ export class SccRuntime {
   click(event: string, selectedItem = 0): boolean {
     this.cancelActive();
     return this.dispatch(event, selectedItem);
+  }
+
+  /** Dispatch the loader-created Click 0 Fault Interface Program through this executor. */
+  dispatchFault(x: number, y: number): void {
+    const commands = this.syntheticFaultProgram.commands;
+    for (const index of [0, 1, 3]) {
+      const command = commands[index];
+      if (command?.op === 'Goto' || command?.op === 'Setxy') { command.x = x; command.y = y; }
+    }
+    const state: ProgramState = { program: this.syntheticFaultHandler.programs.get(0)!, active: true, waiting: false, pc: 0 };
+    this.programs.push(state);
+    this.run(state);
   }
 
   /**
@@ -179,6 +257,14 @@ export class SccRuntime {
         if (!state.waiting) {
           const hasPath = this.goto(command.x, command.y);
           if (hasPath) { state.waiting = true; return; }
+          // Native executor special case: Goto; Setxy; StartW Speak skips the
+          // first Setxy on route failure and suppresses the Setxy after Speak.
+          const nextAfterSetxy = state.program.commands[state.pc + 2];
+          if (nextAfterSetxy?.op === 'StartW' && nextAfterSetxy.name === 'Speak') {
+            state.suppressSetxy = true;
+            state.pc += 2;
+            continue;
+          }
           state.waiting = true;
           return;
         }
@@ -199,7 +285,11 @@ export class SccRuntime {
       if (command.op === 'Ublock') { this.host.setBlocked?.(false); state.pc++; continue; }
       // Opcode 0x15: findAnimation, then 0x404fb4(anim, 0) — deactivate and frame=1.
       if (command.op === 'Stop') { this.host.stopAnimation?.(command.name); state.pc++; continue; }
-      if (command.op === 'Setxy') { this.host.setPosition(command.x, command.y); state.pc++; continue; }
+      if (command.op === 'Setxy') {
+        if (state.suppressSetxy) state.suppressSetxy = false;
+        else this.host.setPosition(command.x, command.y);
+        state.pc++; continue;
+      }
       if (command.op === 'Addtol') { this.addInventory(command.id); state.pc++; continue; }
       // Opcode 0x11 -> 0x40c4dc -> 0x40ec50: clear every one of the 100 slots equal to the ID.
       if (command.op === 'Remtol') { this.removeInventory(command.id); state.pc++; continue; }
