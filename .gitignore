@@ -1,0 +1,137 @@
+# ============================================
+# Original game (copyrighted content)
+# ============================================
+
+/agent-original/
+
+# Game archives and binaries, regardless of location
+*.exe
+*.dll
+*.cab
+*.iso
+*.mdf
+*.mds
+*.rar
+*.7z
+*.rss
+
+# Original game resources
+*.exe
+*.dll
+*.rss
+*.MULT
+*.mult
+*.SCC
+*.scc
+*.TIF
+*.tif
+*.tiff
+*.wav
+*.avi
+*.iso
+*.mdf
+*.cab
+
+# ============================================
+# Extracted and converted game assets
+# ============================================
+
+/game-resources/
+/extracted/
+/generated-assets/
+
+# Browser-ready copies of original game assets
+/public/game/
+/public/game-assets/
+/public/assets/game/
+/public/assets/generated/
+/src/assets/game/
+/public/resources/
+/public/generated/
+
+/research/mult/*.png
+/research/navigation/*.png
+/research/transitions/evidence/scene-switch/
+/research/transitions/evidence/scc-visibility/
+/research/transitions/evidence/level1-interactions/
+/research/transitions/evidence/integrated-columns-verify/
+/research/rendering/evidence/columns/
+/research/navigation/evidence/*.json
+# Raw reverse-engineering evidence
+/research/**/evidence/**/*.json
+/research/**/evidence/*.json
+
+/research/rendering/evidence/
+/research/transitions/evidence/
+
+# ============================================
+# Node.js / pnpm
+# ============================================
+
+node_modules/
+dist/
+coverage/
+.vite/
+*.tsbuildinfo
+.pnpm-store/
+
+
+# ============================================
+# Python
+# ============================================
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+
+
+# ============================================
+# Reverse engineering artifacts
+# ============================================
+
+*.gpr
+*.rep
+*.i64
+*.idb
+*.id0
+*.id1
+*.nam
+*.til
+
+*.gpr/
+*.rep/
+
+
+# Large reverse-engineering analysis dumps
+/research/mult/verification.json
+/research/mult/evidence/functions.json
+/research/mult/evidence/transparency.json
+/research/scc/evidence/0x4066c8.json
+/research/scc/evidence/0x405e5c.json
+
+# ============================================
+# Local agent configuration
+# ============================================
+
+.dsh/
+.codex/
+
+# Credentials
+.env
+.env.*
+!.env.example
+
+
+# ============================================
+# OS / editors / temp
+# ============================================
+
+.DS_Store
+.idea/
+.vscode/
+*.log
+*.tmp
+*.swp
+/research/mult/rea_client.mjs

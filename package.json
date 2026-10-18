@@ -1,0 +1,31 @@
+{
+  "name": "agent-revers-browser",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.12.4",
+  "type": "module",
+  "scripts": {
+    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "predev": "pnpm prepare:assets",
+    "dev": "vite",
+    "prebuild": "pnpm prepare:assets",
+    "build": "tsc -b && vite build",
+    "pretest": "pnpm prepare:assets",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e:browser": "node scripts/e2e-browser-transition.mjs",
+    "e2e:browser:interactions": "node scripts/e2e-browser-level1-interactions.mjs",
+    "e2e:browser:columns": "node scripts/e2e-level39-columns.mjs"
+  },
+  "dependencies": {
+    "pixi.js": "^8.8.1",
+    "utif": "^3.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/utif": "^3.0.4",
+    "typescript": "~5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
