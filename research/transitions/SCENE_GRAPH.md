@@ -15,10 +15,10 @@ Legend:
   must be visible/hit, the selected item must equal `Click.itemId`, the
   `Case N` branch must match `stateObject.state == N`, and a preceding
   `Goto`/`Goport` path must finish. Conditions are listed where known.
-- **Possible (unconfirmed)** — an edge that only exists through a
-  cross-scene `Lstate`/`State` precondition, or through the map-screen
-  `0x40d2a4` / save-load `0x40c7c4` (NOT in SCC); these are marked explicitly
-  and are **not** claimed as SCC-verified transitions.
+- **Possible (unconfirmed)** — a hypothesized non-SCC entry must be marked
+  separately. Map travel `0x40d2a4` uses a fixed 2×7 table, now recovered in
+  [SCC_MAP_MISC](../scc/SCC_MAP_MISC.md); save-load `0x40c7c4` restores a saved
+  scene, not proof that the scene can first be reached through gameplay.
 
 Semantics of the three commands (CONFIRMED, from
 [SCENE_TRANSITIONS](SCENE_TRANSITIONS.md)):
@@ -162,8 +162,10 @@ scenes (37↔1, 38↔2, 39↔5, 40↔6, 41↔10, 42≈11, 43≈13, 44≈18+1, 45
 
 - **45 of 47** scenes are reachable from Level1 by following `Level` edges.
 - **Level26 and Level48 are NOT reachable** via any SCC `Level` (no incoming
-  edge). They are entered through the map-screen (`0x40d2a4 → DAT_0046851c`)
-  or save-load (`0x40c7c4`), i.e. **possible-but-unconfirmed by SCC**.
+  edge). Their first-entry mechanism is **UNKNOWN**. The recovered map-screen
+  table at `0x4456b4` contains neither scene (2 banks×7 destinations), so the
+  previous suggestion that this map path enters them is withdrawn. Save-load
+  can restore an existing saved scene but does not establish its initial entry.
 - The reverse is much smaller: only the revisit hub scenes can *reach* Level1
   back (`{38,39,40,41,42,43,44,45,46,47}`), consistent with the evening act
   funneling back to the starting courtyard.
@@ -199,7 +201,7 @@ The evening scenes form a second, shorter spine that returns to Level1:
   45 ─▶ 44@3 · 46@2
   46 ─▶ 1@3 · 45@3
   47 ─▶ 39@2 · 41@3
-  48 ─▶ 34@-1   (ending scene; entered via map/save, not SCC)
+  48 ─▶ 34@-1   (first-entry mechanism UNKNOWN; not in recovered map table)
 ```
 
 ---
@@ -233,8 +235,10 @@ Two handlers:
    Conditions: `Lec_v.state == 1` (set by step 1). Enters Level38 at
    `Portal[0] = (5, 910, 425)`.
 
-Both handlers use **only implemented commands**; the blocker for the port is
-scene 38 not being in the manifest, not a missing opcode.
+Both handlers use **only implemented commands**. The old manifest blocker is
+superseded: local master `e08f0f0` loads all47 scenes and verifies this route.
+This is not a claim that every internal Level38 cutscene is implemented;
+its mask/Block/Fclick/remote-State gaps are in SCC_MISSING_OPCODES.
 
 ### 4.3 Level39 → Level40 (confirmed, conditional)
 
@@ -287,9 +291,10 @@ the existing tests and browser E2E.
 - **`Setmsk` is not a transition** — it swaps the navigation mask within the
   same scene (doors/paths), not the scene itself.
 - **`Fault`/`Active`/`Light` are not transitions.**
-- **Level26 / Level48 have no incoming SCC edge** — the graph does not claim
-  they are entered from a scene; they are map-screen/save entries
-  (possible-but-unconfirmed).
+- **Level26 / Level48 have no incoming SCC edge** and are absent from both
+  recovered map banks. Do not call them confirmed map entries or infer that48
+  is the ending solely from its number. Their initial-entry mechanism remains
+  UNKNOWN; the confirmed Final.avi/Egame ending commands occur in Level28.
 
 ## 7. Reproduce
 

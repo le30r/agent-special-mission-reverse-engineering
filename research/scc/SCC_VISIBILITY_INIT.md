@@ -20,7 +20,7 @@
 |---|---|---|---|
 | `Show <name>` | `0x171a5` | `0x4074f3` | `0x1e` |
 | `Hide <name>` | `0x14691` | `0x4074c3` | `0x10` |
-| `Setzon <int>` | `0x1718b` | `0x407873` | `0x20` |
+| `Setzon <int>` | `0x1718b` | `0x407873` | `0x21` |
 | `SclipW <int> <avi>` | `0x1704c` | `0x407810` | `0x1b` |
 | `Smusic <int> <mp3>` | `0x1749d` | `0x407794` | `0x17` |
 
@@ -256,19 +256,18 @@ dispatch Init (0x4079ac)  →  синхронное исполнение до Sc
 
 ## 5. Минимальная семантика Setzon / SclipW / Smusic
 
-### 5.1. Setzon — CONFIRMED (static) запись; DERIVED (не доказано отсутствие влияния)
+### 5.1. Setzon — исправление ошибочной привязки opcode (CONFIRMED static)
 
-Opcode `0x20`, `0x40659b`:
-
-```asm
-MOV EAX,[EBX+0x4]        ; значение
-MOV ECX,[0x00468788]     ; глобальный указатель игрового/UI-объекта
-MOV [ECX+0x21],EAX       ; gameObject+0x21 = zone
-```
-
-Не блокирует. Единственный писатель поля `gameObject+0x21` — сама команда Setzon (xrefs на `0x468788`: только исполнитель и window-proc `0x40f204`). В цепочке Goto_5 (Show → `+0x297` → `0x404c50` → `0x4079ac` → `0x408cd8` → `Goto`/`Level`) поле `gameObject+0x21` **не читается**.
-
-**Однако** читатели поля в window-proc `0x40f204` полностью не прослежены, поэтому **категорически доказать** «Setzon не влияет на доступность Goto_5» нельзя. Статус: **DERIVED** — поле не на критическом пути, риск низкий, но не нулевой. Рекомендация: реализовать как сохранение int в отдельный регистр `zone` (дешевле, чем доказывать no-op) либо явно задокументировать no-op как риск. Аргументы `0..6` в корпусе.
+Прежняя версия ошибочно назвала ветку opcode `0x20` командой Setzon.
+Она принадлежит **Setmap** (hash `0x17172`, parser `0x407846`) и пишет банк
+карты в `UI+0x21`. Настоящий **Setzon** (hash `0x1718b`, parser `0x407873`)
+создаёт opcode `0x21`: `0x4065a9 → 0x40d280` устанавливает
+`unlocked[bank*7+zone]=1` в таблице `0x445724`. Оба не блокируют SCC.
+Это CONFIRMED по полной parser/executor assembly и потребителям карты,
+а не гипотеза по имени. Прежняя рекомендация «сохранить int zone или no-op»
+**отменена**: она теряет доступность переходов через карту. Прямой цепочке
+Goto_5 этот флаг не нужен, но это не эквивалентность на уровне всей игры.
+Контракты, save/load и доказательства: [SCC_MAP_MISC](SCC_MAP_MISC.md).
 
 ### 5.2. SclipW — CONFIRMED (static), видео, БЛОКИРУЕТ
 
@@ -306,7 +305,9 @@ Opcode `0x17`, `0x40645f`: `0x402768(*(0x461680), имя_mp3, A>0)`. `0x402768` 
 4. **Рендер `Active`**: не рисовать.
 5. **Init как Program**: при первом входе (`scene+4==0`) исполнять handler `eventName="Init"` через общий Click-механизм синхронно до yield.
 6. **Порядок загрузчика**: разбор → preload → dispatch Init → Portal/позиция → dispatch Start → Arrow.
-7. **SclipW/Smusic/Setzon**: см. §5; SclipW — no-op/один yield; Smusic — no-op; Setzon — сохранить int или no-op с риском.
+7. **SclipW/Smusic/Setzon**: прежние рекомендации заглушек относятся только
+   к старому прототипу. Оригинальные media-контракты — AUDIO_RUNTIME;
+   Setzon — banked map unlock, не int/no-op (исправление §5.1, SCC_MAP_MISC).
 8. **Персистентность**: `visible` сохраняется в `SceneState` (переживает переходы) и, при реализации save/load, сериализуется вместе с rect (и для базового `Object` — MULT name/frame/record).
 
 ## 8. Проверяемые тестовые сценарии
@@ -327,7 +328,7 @@ Opcode `0x17`, `0x40645f`: `0x402768(*(0x461680), имя_mp3, A>0)`. `0x402768` 
 
 | Статус | Вопрос | Проверка |
 |---|---|---|
-| DERIVED (риск) | Читатели `gameObject+0x21` (Setzon) в window-proc не прослежены; категорическое «не влияет на Goto_5» не доказано | проследить все чтения `[0x468788]+0x21` |
+| CONFIRMED, закрыто | Поле `UI+0x21` принадлежит Setmap; Setzon открывает пункт карты в `0x445724` | SCC_MAP_MISC: parser/opcode mapping и map consumers |
 | UNKNOWN | Точный смысл `scroll[1]` (`scene+0x76a`, всегда 0) и `size[W,H]` для Active (не используется) | подтвердить отсутствие вертикальной прокрутки |
 | UNKNOWN | Поведение `SclipW` при отсутствующем AVI и его влияние на тайминг Init | read-only replay без `Rolik1.avi` |
 | UNKNOWN | Намеренность no-op `Show Vaza` (Level7) на базовом Object | не требуется для Goto_5 |
@@ -338,7 +339,8 @@ Opcode `0x17`, `0x40645f`: `0x402768(*(0x461680), имя_mp3, A>0)`. `0x402768` 
 2. **Поля**: `Active`/`Light` — байт `+0x297`; базовый `Object` — `+0x167` (имя MULT).
 3. **Рендеринг/hit-test**: `Active` не рисуется; `0x404c50` проверяет `+0x297` первым, затем **строгий** прямоугольник `rect-scroll`; базовый `Object` — пиксельный hit-test, пустое имя MULT → промах.
 4. **Init**: обычный `Click 0 Init Interface`, синхронно до первого yield (SclipW); Init и Start-программы могут сосуществовать; на свежем Level1 Start не активируется.
-5. **Setzon/SclipW/Smusic**: не на критическом пути Goto_5; Setzon — DERIVED (риск), SclipW блокирует, Smusic нет.
+5. **Setzon/SclipW/Smusic**: не на прямом пути Goto_5; Setzon открывает
+   пункт карты (CONFIRMED, §5.1), SclipW блокирует, Smusic нет.
 6. **Цепочка Goto_5**: `Show` → `+0x297=1` → hit-test → dispatch → `Case 0/1` → `Goto` → `Level`.
 7. **Повторы**: идемпотентная запись; несуществующее имя пропускается.
 8. **Переходы сцен**: `+0x297` сохраняется в памяти и сериализуется; Init не переигрывается.
@@ -354,8 +356,13 @@ Opcode `0x17`, `0x40645f`: `0x402768(*(0x461680), имя_mp3, A>0)`. `0x402768` 
 | Двойная прокрутка | не отмечена | Возможна при портировании; hit-test применяет scroll ровно один раз | CONFIRMED (риск) |
 | `Hide` базового Object | «очищает изображение» (неточно) | Очищает **первый байт** `+0x167`; `+0x267` (frame)/`+0x26b` (record) **остаются**; следующий кадровый event `0x404928` восстанавливает изображение; hit-test `0x40445c` с пустым именем → ранний return 0 | CONFIRMED |
 | «Show только Active/Light» | категорично (§1.3), ниже контрпример Level7 | Уточнено: в корпусе один `Show` на базовом Object (`Level7 Show Vaza`) — no-op | CONFIRMED |
-| Setzon «не влияет на Goto_5» | CONFIRMED (§5.1) | **DERIVED** (риск): единственный писатель, не на критическом пути, но читатели `gameObject+0x21` не прослежены | DERIVED |
+| Setzon как запись int `UI+0x21` | Ошибочная привязка opcode0x20 | **Исправлено**: opcode0x20 — Setmap; Setzon opcode0x21 открывает banked map slot. Прямой Goto_5 независим, но карта/проходимость зависят | CONFIRMED, SCC_MAP_MISC |
 | Init/SclipW при пропуске | не отмечено | Пропуск SclipW ведёт к двойному `Start Slip`/`Smusic` (State устанавливаются до dispatch Start) | CONFIRMED (различие) |
 | Приостановленный Init после re-entry | не отмечено | Освобождается при `0x407c14` (старый Program удаляется), не возобновляется | CONFIRMED |
 
-Кратко для реализации (Flash): `Active` — rect + `visible` (дефолт false); Show/Hide — флаг; hit-test — `visible` первым, затем строгий `rect - scroll` по сырым screen-координатам; Init — синхронный Program при `scene+4==0`; SclipW/Smusic — no-op (с учётом двойного `Start Slip`/`Smusic`); Setzon — сохранить int или no-op с явным риском; `visible` (и rect) персистентны и сериализуемы.
+Кратко для реализации (Flash, исторический срез): `Active` — rect + `visible`
+(дефолт false); Show/Hide — флаг; hit-test — `visible` первым, затем строгий
+`rect - scroll` по сырым screen-координатам; Init — синхронный Program при
+`scene+4==0`; `visible` и rect персистентны и сериализуемы. Прежние рекомендации
+SclipW/Smusic как no-op не описывают оригинал (см. AUDIO_RUNTIME), а Setzon
+как int/no-op ошибочна: см. исправление §5.1 и SCC_MAP_MISC.
