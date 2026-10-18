@@ -40,6 +40,7 @@ export type SceneDefinition = {
   audioEvents: FrameSoundEvent[];
   audioResources: Readonly<Record<string, string>>;
   audioDurations: Readonly<Record<string, number>>;
+  audioStorageModes?: Readonly<Record<string, 'sharedPcm' | 'privateDecoded'>>;
 };
 
 export type SceneDefinitionInput = {
@@ -57,6 +58,7 @@ export type SceneDefinitionInput = {
   layoutAnimation?: string;
   audioResources?: Readonly<Record<string, string>>;
   audioDurations?: Readonly<Record<string, number>>;
+  audioStorageModes?: Readonly<Record<string, 'sharedPcm' | 'privateDecoded'>>;
 };
 
 /** Focus <A> <B> <C> feeds depth/scale: depth = q*B, scale = A/(A+depth)*C. */
@@ -185,5 +187,6 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     audioEvents: parseFrameSoundEvents(declarationSource),
     audioResources: input.audioResources ?? {},
     audioDurations: input.audioDurations ?? {},
+    audioStorageModes: input.audioStorageModes ?? {},
   };
 }

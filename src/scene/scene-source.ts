@@ -61,6 +61,7 @@ export type SceneManifest = {
   /** Normalized full SCC WAV resource name -> immutable prepared URL. */
   audioResources?: Record<string, string>;
   audioDurations?: Record<string, number>;
+  audioStorageModes?: Record<string, 'sharedPcm' | 'privateDecoded'>;
   diagnostics: Array<{ level: 'warning' | 'error'; scene?: number; kind: string; path?: string; message: string }>;
 };
 
@@ -154,6 +155,7 @@ export async function loadSceneDefinition(
   reader: SceneResourceReader = fetchSceneReader,
   audioResources: Readonly<Record<string, string>> = {},
   audioDurations: Readonly<Record<string, number>> = {},
+  audioStorageModes: Readonly<Record<string, 'sharedPcm' | 'privateDecoded'>> = {},
 ): Promise<SceneDefinition> {
   const requiredReasons = entry.missing.required.map((missing) => missing.message);
   if (!entry.loadable || requiredReasons.length) throw new SceneLoadError(entry.id, requiredReasons);
@@ -190,6 +192,7 @@ export async function loadSceneDefinition(
     layoutAnimation: entry.layoutAnimation ?? undefined,
     audioResources,
     audioDurations,
+    audioStorageModes,
   });
   definition.warnings.push(...warnings);
   return definition;
@@ -230,7 +233,7 @@ export class SceneAssetProvider implements SceneProvider {
     const entry = this.byId.get(id);
     if (!entry) throw new SceneLoadError(id, ['scene is not present in the prepared manifest']);
     if (this.loaded.has(id)) return this.loaded.get(id)!;
-    const definition = await loadSceneDefinition(entry, this.reader, this.manifest.audioResources, this.manifest.audioDurations);
+    const definition = await loadSceneDefinition(entry, this.reader, this.manifest.audioResources, this.manifest.audioDurations, this.manifest.audioStorageModes);
     const external = collectAnimationExternalImages(definition);
     if (external.missing.length) definition.warnings.push(`External images missing from the manifest: ${external.missing.join(', ')}`);
     const failedExternal = await preloadExternalTextures(external.urls);

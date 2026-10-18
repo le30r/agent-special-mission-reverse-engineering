@@ -104,6 +104,7 @@ for (const relative of ['block1/Xsh/Base', 'block0/XSH/Interface']) {
 /** Prepare immutable browser copies of original WAVs; never rewrite the source tree. */
 const audioResources = {};
 const audioDurations = {};
+const audioStorageModes = {};
 for (const file of await walk(source)) {
   if (!/\.wav$/i.test(file)) continue;
   const rel = path.relative(source, file).split(path.sep).join('/');
@@ -116,7 +117,10 @@ for (const file of await walk(source)) {
     while (offset + 8 <= wavBytes.length) {
       const id = wavBytes.toString('ascii', offset, offset + 4), size = wavBytes.readUInt32LE(offset + 4), body = offset + 8;
       if (body + size > wavBytes.length) break;
-      if (id === 'fmt ' && size >= 12) average = wavBytes.readUInt32LE(body + 8);
+      if (id === 'fmt ' && size >= 12) {
+        average = wavBytes.readUInt32LE(body + 8);
+        audioStorageModes[key] = wavBytes.readUInt16LE(body) === 1 ? 'sharedPcm' : 'privateDecoded';
+      }
       if (id === 'data') dataBytes = size;
       offset = body + size + (size & 1);
     }
@@ -256,6 +260,7 @@ const manifest = {
   generator: 'scripts/prepare-assets.mjs',
   audioResources,
   audioDurations,
+  audioStorageModes,
   summary: {
     total: scenes.length,
     loadable,
