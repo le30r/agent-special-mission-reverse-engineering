@@ -11,7 +11,7 @@
  * browser loads one scene's SCC/MULT/mask/background/external images when it is
  * entered; this script may copy and convert the whole corpus ahead of time.
  */
-import { cp, mkdir, readdir, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,11 +25,13 @@ const output = path.join(root, 'public/resources');
 const generated = path.join(root, 'public/generated');
 const backgroundsOutput = path.join(generated, 'backgrd');
 const externalOutput = path.join(generated, 'tzu');
+const audioOutput = path.join(generated, 'audio');
 
 await mkdir(output, { recursive: true });
 await mkdir(generated, { recursive: true });
 await mkdir(backgroundsOutput, { recursive: true });
 await mkdir(externalOutput, { recursive: true });
+await mkdir(audioOutput, { recursive: true });
 
 async function fileStat(file) {
   try { return await stat(file); } catch { return undefined; }
@@ -68,7 +70,7 @@ async function convertTiff(from, to) {
 const discovery = await discoverSceneDependencies({ sourceRoot: source, scriptsRoot: scripts });
 const diagnostics = [...discovery.diagnostics];
 
-const copied = { scc: 0, mult: 0, mask: 0, background: 0, shared: 0 };
+const copied = { scc: 0, mult: 0, mask: 0, background: 0, shared: 0, wav: 0, wavPcm: 0 };
 const converted = { background: 0, external: 0, skipped: 0, failed: 0 };
 
 /** Copy every scene SCC and every recursively included SCC at the resources root. */
@@ -97,6 +99,41 @@ for (const relative of ['block1/Xsh/Base', 'block0/XSH/Interface']) {
     const rel = path.relative(source, file);
     if (await copyIfChanged(file, path.join(output, rel))) copied.shared++;
   }
+}
+
+/** Prepare immutable browser copies of original WAVs; never rewrite the source tree. */
+const audioResources = {};
+const audioDurations = {};
+for (const file of await walk(source)) {
+  if (!/\.wav$/i.test(file)) continue;
+  const rel = path.relative(source, file).split(path.sep).join('/');
+  const target = path.join(output, rel);
+  if (await copyIfChanged(file, target)) copied.wav++;
+  const key = rel.replace(/^block\d+\//i, '').toLowerCase().replaceAll('\\', '/');
+  const wavBytes = await readFile(file);
+  if (wavBytes.length >= 12 && wavBytes.toString('ascii', 0, 4) === 'RIFF' && wavBytes.toString('ascii', 8, 12) === 'WAVE') {
+    let offset = 12, dataBytes = 0, average = 0;
+    while (offset + 8 <= wavBytes.length) {
+      const id = wavBytes.toString('ascii', offset, offset + 4), size = wavBytes.readUInt32LE(offset + 4), body = offset + 8;
+      if (body + size > wavBytes.length) break;
+      if (id === 'fmt ' && size >= 12) average = wavBytes.readUInt32LE(body + 8);
+      if (id === 'data') dataBytes = size;
+      offset = body + size + (size & 1);
+    }
+    audioDurations[key] = average > 0 ? Math.floor(dataBytes * 1000 / average) : -1;
+  }
+  const pcmTarget = path.join(audioOutput, rel);
+  const [inputStat, pcmStat] = await Promise.all([fileStat(file), fileStat(pcmTarget)]);
+  if (!pcmStat?.isFile() || pcmStat.mtimeMs < inputStat.mtimeMs) {
+    await mkdir(path.dirname(pcmTarget), { recursive: true });
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', file, '-map_metadata', '0', '-c:a', 'pcm_s16le', pcmTarget], { encoding: 'utf8' });
+    if (result.status === 0) copied.wavPcm++;
+    else diagnostics.push({ level: 'warning', kind: 'wav-convert', path: rel, message: result.error?.message ?? result.stderr?.trim() ?? `ffmpeg exited ${result.status}` });
+  }
+  // Preserve complete RSS-style resource names; ambiguous duplicate keys are not silently overwritten.
+  if (audioResources[key] && audioResources[key] !== `/resources/${rel}`) {
+    diagnostics.push({ level: 'error', kind: 'wav-ambiguous', path: key, message: `Ambiguous WAV resource key ${key}` });
+  } else audioResources[key] = existsSync(pcmTarget) ? `/generated/audio/${rel}` : `/resources/${rel}`;
 }
 
 /** Copy masks, backgrounds and every declared animation MULT. */
@@ -217,6 +254,8 @@ const incomplete = scenes.filter((scene) => !scene.loadable).map((scene) => ({ i
 const manifest = {
   version: 2,
   generator: 'scripts/prepare-assets.mjs',
+  audioResources,
+  audioDurations,
   summary: {
     total: scenes.length,
     loadable,
@@ -230,7 +269,7 @@ await writeFile(path.join(generated, 'scenes.json'), `${JSON.stringify(manifest,
 
 const sceneIds = scenes.map((scene) => scene.id);
 console.log(`Discovered ${scenes.length} original scenes: ${sceneIds.join(', ')}`);
-console.log(`Copied SCC=${copied.scc} MULT=${copied.mult} mask=${copied.mask} background=${copied.background} shared=${copied.shared}.`);
+console.log(`Copied SCC=${copied.scc} MULT=${copied.mult} mask=${copied.mask} background=${copied.background} shared=${copied.shared} WAV=${copied.wav}; PCM-converted WAV=${copied.wavPcm}.`);
 console.log(`Converted background=${converted.background} external=${converted.external} (reused ${converted.skipped}, failed ${converted.failed}).`);
 console.log(`Loadable scenes: ${loadable.length}/${scenes.length}${incomplete.length ? `; incomplete: ${incomplete.map((entry) => entry.id).join(', ')}` : ''}.`);
 if (diagnostics.length) {

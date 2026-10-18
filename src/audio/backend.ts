@@ -7,6 +7,7 @@ export interface AudioBufferPort {
 
 export interface AudioBufferSourcePort {
   buffer: AudioBufferPort | null;
+  loop?: boolean;
   onended: (() => void) | null;
   connect(destination: unknown): void;
   start(when?: number): void;
@@ -40,6 +41,8 @@ export interface PlaybackHandle {
 export interface PlayOptions {
   /** Abort an in-flight fetch/decode or stop playback when aborted. */
   signal?: AbortSignal;
+  /** Loop the single source (used by SCC Fram Repeat declarations). */
+  loop?: boolean;
 }
 
 export interface AudioBackendOptions {
@@ -125,6 +128,8 @@ export class BrowserAudioBackend {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly active = new Map<number, Playback>();
   private cacheBytes = 0;
+  private pendingLoads = 0;
+  private pendingDecodes = 0;
   private nextPlaybackId = 1;
   private disposed = false;
 
@@ -154,6 +159,7 @@ export class BrowserAudioBackend {
 
     const source = this.context.createBufferSource();
     source.buffer = buffer;
+    source.loop = options.loop ?? false;
     source.connect(this.context.destination);
     const id = this.nextPlaybackId++;
     const playback = new Playback(id, url, source, (ended) => {
@@ -187,6 +193,8 @@ export class BrowserAudioBackend {
 
   get cachedBytes(): number { return this.cacheBytes; }
   get activePlaybackCount(): number { return this.active.size; }
+  get contextState(): string { return this.context.state; }
+  get debugCounts(): string { return `load=${this.pendingLoads}/decode=${this.pendingDecodes}/cache=${this.cache.size}`; }
 
   async dispose(): Promise<void> {
     if (this.disposed) return;
@@ -205,6 +213,7 @@ export class BrowserAudioBackend {
     }
 
     const controller = new AbortController();
+    this.pendingLoads++;
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     try {
@@ -215,9 +224,12 @@ export class BrowserAudioBackend {
       if (signal?.aborted) throw new AudioAbortedError(url);
       let buffer: AudioBufferPort;
       try {
+        this.pendingDecodes++;
         buffer = await this.context.decodeAudioData(bytes);
       } catch (error) {
         throw new AudioLoadError(url, `Unable to decode audio resource: ${url}`, { cause: error });
+      } finally {
+        this.pendingDecodes--;
       }
       if (signal?.aborted) throw new AudioAbortedError(url);
       this.insertCache(url, buffer);
@@ -230,6 +242,7 @@ export class BrowserAudioBackend {
       throw new AudioLoadError(url, `Unable to load audio resource: ${url}`, { cause: error });
     } finally {
       signal?.removeEventListener('abort', abort);
+      this.pendingLoads--;
     }
   }
 
@@ -260,10 +273,10 @@ export class AudioResourceScope {
 
   constructor(private readonly backend: BrowserAudioBackend) {}
 
-  async play(url: string): Promise<PlaybackHandle> {
+  async play(url: string, options: PlayOptions = {}): Promise<PlaybackHandle> {
     if (this.disposed) throw new Error('Audio resource scope has been disposed');
     this.urls.add(url);
-    const playback = await this.backend.play(url, { signal: this.controller.signal });
+    const playback = await this.backend.play(url, { ...options, signal: this.controller.signal });
     if (this.disposed) playback.stop();
     else this.playbacks.add(playback);
     void playback.finished.then(() => this.playbacks.delete(playback));
