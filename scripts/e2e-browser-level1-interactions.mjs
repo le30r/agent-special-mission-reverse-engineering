@@ -11,6 +11,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
@@ -105,14 +106,43 @@ function positionOf(text) { return /pos=\((-?\d+),(-?\d+)\)/.exec(text)?.slice(1
 
 try {
   await send('Page.enable');
+  await installE2EAudioPolicy(send);
   await send('Runtime.enable');
+  await send('Page.addScriptToEvaluateOnNewDocument', { source: `(() => {
+    const trace = window.__audioTrace = [];
+    const record = (event, detail = {}) => trace.push({ time: performance.now(), event, ...detail });
+    const originalFetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const url = String(args[0]?.url ?? args[0]);
+      if (!/\\.wav(?:$|\\?)/i.test(url)) return originalFetch(...args);
+      record('fetch.start', { url });
+      if (${Number(process.env.E2E_WAV_DELAY_MS ?? 0)} > 0) await new Promise((resolve) => setTimeout(resolve, ${Number(process.env.E2E_WAV_DELAY_MS ?? 0)}));
+      const response = await originalFetch(...args);
+      record('fetch.complete', { url, status: response.status });
+      return response;
+    };
+    const decode = AudioContext.prototype.decodeAudioData;
+    AudioContext.prototype.decodeAudioData = function(data, ...args) {
+      record('decode.start', { contextState: this.state });
+      const result = decode.call(this, data, ...args);
+      return result.then((buffer) => { record('decode.complete', { duration: buffer.duration }); return buffer; }, (error) => { record('decode.error', { error: String(error) }); throw error; });
+    };
+    const start = AudioBufferSourceNode.prototype.start;
+    AudioBufferSourceNode.prototype.start = function(...args) {
+      const detail = { contextState: this.context.state, duration: this.buffer?.duration };
+      try { const result = start.apply(this, args); record('source.start.ok', detail); this.addEventListener('ended', () => record('source.onended', detail), { once: true }); return result; }
+      catch (error) { record('source.start.error', { ...detail, error: String(error) }); throw error; }
+    };
+    const stop = AudioBufferSourceNode.prototype.stop;
+    AudioBufferSourceNode.prototype.stop = function(...args) { record('source.stop', { contextState: this.context.state }); return stop.apply(this, args); };
+  })();` });
   await send('Page.navigate', { url: startUrl });
   let text = await waitFor('initial Level1 panel', async () => {
     const current = await panel();
     return current.includes('SCENE DEBUG · active=1') && current.includes('Goto_5.visible=true') ? current : false;
   });
   await waitForPanel('init=[1:1]');
-  await sleep(700);
+  await sleep(Number(process.env.E2E_AUDIO_WARM_MS ?? 700));
   text = await panel();
   assert(text.includes('zone=3'), `Setzon 3, got:\n${text}`);
   assert(text.includes('scroll=599'), `initial scroll 599, got:\n${text}`);
@@ -126,8 +156,10 @@ try {
 
   // 1) Pistol: ordinary scene click on the declared Object's external image.
   //    World center (1104.67,569.1) - start scroll 599 = screen (505.7,569.1).
+  const startsBeforePistol = await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length");
   await logicalClick(506, 569);
   text = await waitForPanel('inventory=[4]', 30000);
+  await waitFor('successful pistol AudioBufferSourceNode.start()', async () => (await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length")) > startsBeforePistol, 10000);
   assert(text.includes('Nar.visible=false'), `Hide Nar after pistol pickup, got:\n${text}`);
   assert(text.includes('Pistol=removed/0x0/d1000'), `K_pistol frame 20 removes the pistol image, got:\n${text}`);
   assert(text.includes('level1.Botl.state=0'), `pistol must not touch bottle state, got:\n${text}`);
@@ -136,8 +168,10 @@ try {
   // 2) Bottle positive control through the original Goto/StartW/Addtol/State block.
   //    The bottle neck at world (707,342) is the part not overlapped by the
   //    nearer Per_botl object (depth 900 vs Botl depth 1000); screen = world - 599.
+  const startsBeforeBottle = await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length");
   await logicalClick(108, 342);
   text = await waitForPanel('level1.Botl.state=1', 30000);
+  await waitFor('successful bottle AudioBufferSourceNode.start()', async () => (await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length")) > startsBeforeBottle, 10000);
   assert(text.includes('inventory=[4,1]'), `pistol then bottle in inventory, got:\n${text}`);
   assert(text.includes('Botl=removed/0x0/d1000'), `bottle empty Takedr1 frame, got:\n${text}`);
   await screenshot('03-bottle-collected.png');
@@ -185,6 +219,16 @@ try {
 
   const after = await panel();
   console.log('\nFINAL DEBUG PANEL\n' + after);
+  const trace = await evaluate('window.__audioTrace ?? []');
+  const starts = trace.filter((event) => event.event === 'source.start.ok');
+  assert(starts.length >= 2, `expected successful AudioBufferSourceNode starts for pistol and bottle, got ${JSON.stringify(trace)}`);
+  const muteState = await evaluate('({ muted: window.__e2eAudioMuted === true, connections: window.__e2eAudioMuteCount ?? 0 })');
+  if (process.env.E2E_MUTE_AUDIO === '0') assert(!muteState.muted && muteState.connections === 0, `E2E_MUTE_AUDIO=0 should preserve the audible Web Audio graph: ${JSON.stringify(muteState)}`);
+  else assert(muteState.muted && muteState.connections >= starts.length, `E2E should mute only output while preserving source.start(): ${JSON.stringify(muteState)}`);
+  console.log(`\nWEB AUDIO TRACE: ${JSON.stringify(trace)}`);
+  console.log(`\nE2E AUDIO OUTPUT: ${JSON.stringify(muteState)} (muted=${process.env.E2E_MUTE_AUDIO !== '0'})`);
+  const runtimeTrace = await evaluate('window.__audioDebug?.view()?.audio?.diagnostics?.() ?? []');
+  console.log(`\nVOICE/BACKEND TRACE: ${JSON.stringify(runtimeTrace)}`);
   console.log('\nE2E LEVEL1 INTERACTIONS PASSED');
 } finally {
   socket.close();

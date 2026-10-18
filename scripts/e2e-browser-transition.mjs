@@ -12,6 +12,7 @@
  */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
@@ -113,6 +114,7 @@ async function waitForGoto5Visible() {
 
 try {
   await send('Page.enable');
+  await installE2EAudioPolicy(send);
   await send('Runtime.enable');
   await send('Page.navigate', { url: startUrl });
   await waitFor('initial Level1 panel', async () => {
