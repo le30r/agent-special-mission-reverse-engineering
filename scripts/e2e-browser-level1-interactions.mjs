@@ -20,31 +20,46 @@ const logicalWidth = 800;
 const logicalHeight = 600;
 
 const targets = await (await fetch(`${cdpEndpoint}/json`)).json();
-const page = targets.find((target) => target.type === 'page' && target.url.includes('127.0.0.1'))
+const originalPage = targets.find((target) => target.type === 'page' && target.url.includes('127.0.0.1'))
   ?? targets.find((target) => target.type === 'page');
-if (!page) throw new Error(`No page target at ${cdpEndpoint}`);
+if (!originalPage) throw new Error(`No page target at ${cdpEndpoint}`);
+const version = await (await fetch(`${cdpEndpoint}/json/version`)).json();
 
-const socket = new WebSocket(page.webSocketDebuggerUrl);
-await new Promise((resolve, reject) => {
-  socket.addEventListener('open', resolve, { once: true });
-  socket.addEventListener('error', reject, { once: true });
-});
-let nextId = 1;
-const pending = new Map();
-socket.addEventListener('message', (event) => {
-  const message = JSON.parse(event.data);
-  if (!message.id) return;
-  const waiter = pending.get(message.id);
-  if (!waiter) return;
-  pending.delete(message.id);
-  if (message.error) waiter.reject(new Error(`${message.error.message}: ${JSON.stringify(message.error.data ?? null)}`));
-  else waiter.resolve(message.result);
-});
-function send(method, params = {}) {
-  const id = nextId++;
-  socket.send(JSON.stringify({ id, method, params }));
-  return new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+function connect(webSocketDebuggerUrl) {
+  const socket = new WebSocket(webSocketDebuggerUrl);
+  return new Promise((resolve, reject) => {
+    socket.addEventListener('open', () => {
+      let nextId = 1;
+      const pending = new Map();
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data);
+        if (!message.id) return;
+        const waiter = pending.get(message.id);
+        if (!waiter) return;
+        pending.delete(message.id);
+        if (message.error) waiter.reject(new Error(`${message.error.message}: ${JSON.stringify(message.error.data ?? null)}`));
+        else waiter.resolve(message.result);
+      });
+      resolve({ socket, send(method, params = {}) {
+        const id = nextId++;
+        socket.send(JSON.stringify({ id, method, params }));
+        return new Promise((res, rej) => pending.set(id, { resolve: res, reject: rej }));
+      } });
+    }, { once: true });
+    socket.addEventListener('error', reject, { once: true });
+  });
 }
+const browser = await connect(version.webSocketDebuggerUrl);
+const { targetId } = await browser.send('Target.createTarget', { url: 'about:blank' });
+let page;
+for (let attempt = 0; attempt < 50; attempt++) {
+  const current = await (await fetch(`${cdpEndpoint}/json`)).json();
+  page = current.find((target) => target.id === targetId);
+  if (page?.webSocketDebuggerUrl) break;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
+if (!page?.webSocketDebuggerUrl) throw new Error(`Could not open isolated E2E target ${targetId}`);
+const { socket, send } = await connect(page.webSocketDebuggerUrl);
 async function evaluate(expression) {
   const result = await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true });
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Runtime.evaluate failed');
@@ -66,6 +81,15 @@ async function waitForPanel(fragment, timeoutMs = 30000) {
   return await waitFor(`panel to contain ${JSON.stringify(fragment)}`, async () => {
     const text = await panel();
     return text.includes(fragment) ? text : false;
+  }, timeoutMs);
+}
+async function runtimeDiagnosticCount() {
+  return (await evaluate('window.__audioDebug?.view()?.audio?.diagnostics?.() ?? []')).length;
+}
+async function waitForRuntimeResource(resource, afterCount = 0, timeoutMs = 10000) {
+  return await waitFor(`successful playback of ${resource}`, async () => {
+    const events = await evaluate('window.__audioDebug?.view()?.audio?.diagnostics?.() ?? []');
+    return events.slice(afterCount).some((event) => event.event === 'voice.playing' && event.url?.toLowerCase().endsWith(resource.toLowerCase())) ? events : false;
   }, timeoutMs);
 }
 async function canvasRect() {
@@ -156,10 +180,10 @@ try {
 
   // 1) Pistol: ordinary scene click on the declared Object's external image.
   //    World center (1104.67,569.1) - start scroll 599 = screen (505.7,569.1).
-  const startsBeforePistol = await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length");
+  const diagnosticsBeforePistol = await runtimeDiagnosticCount();
   await logicalClick(506, 569);
   text = await waitForPanel('inventory=[4]', 30000);
-  await waitFor('successful pistol AudioBufferSourceNode.start()', async () => (await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length")) > startsBeforePistol, 10000);
+  await waitForRuntimeResource('/KONST/002.WAV', diagnosticsBeforePistol);
   assert(text.includes('Nar.visible=false'), `Hide Nar after pistol pickup, got:\n${text}`);
   assert(text.includes('Pistol=removed/0x0/d1000'), `K_pistol frame 20 removes the pistol image, got:\n${text}`);
   assert(text.includes('level1.Botl.state=0'), `pistol must not touch bottle state, got:\n${text}`);
@@ -168,22 +192,24 @@ try {
   // 2) Bottle positive control through the original Goto/StartW/Addtol/State block.
   //    The bottle neck at world (707,342) is the part not overlapped by the
   //    nearer Per_botl object (depth 900 vs Botl depth 1000); screen = world - 599.
-  const startsBeforeBottle = await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length");
+  const diagnosticsBeforeBottle = await runtimeDiagnosticCount();
   await logicalClick(108, 342);
   text = await waitForPanel('level1.Botl.state=1', 30000);
-  await waitFor('successful bottle AudioBufferSourceNode.start()', async () => (await evaluate("(window.__audioTrace ?? []).filter((event) => event.event === 'source.start.ok').length")) > startsBeforeBottle, 10000);
+  await waitForRuntimeResource('/KONST/004.WAV', diagnosticsBeforeBottle);
   assert(text.includes('inventory=[4,1]'), `pistol then bottle in inventory, got:\n${text}`);
   assert(text.includes('Botl=removed/0x0/d1000'), `bottle empty Takedr1 frame, got:\n${text}`);
   await screenshot('03-bottle-collected.png');
 
   // 3) Move the camera left so the Slip hammock is on screen. These are normal
   //    click-to-walk clicks, not debug calls.
+  const diagnosticsBeforeWalk = await runtimeDiagnosticCount();
   for (let i = 0; i < 5; i++) {
     text = await panel();
     if (scrollOf(text) <= 280) break;
     await logicalClick(60, 470);
     await sleep(1600);
   }
+  await waitForRuntimeResource('/Ylisa1.WAV', diagnosticsBeforeWalk);
   text = await panel();
   assert(scrollOf(text) <= 280, `camera moved left, got:\n${text}`);
   assert(/Slip=visible\/\d+x\d+\/d17/.test(text), `Slip still on its looping animation, got:\n${text}`);
@@ -208,8 +234,10 @@ try {
   await screenshot('06-bottle-selected.png');
 
   // 5) Click a solid Slip pixel. World (303.18,365.36); screen = world - scroll.
+  const diagnosticsBeforeHammock = await runtimeDiagnosticCount();
   await logicalClick(slipScreenX, 365);
   text = await waitForPanel('Flag1.state=1', 30000);
+  await waitForRuntimeResource('/KONST/005.WAV', diagnosticsBeforeHammock);
   assert(text.includes('Slip.state=3'), `State Slip 3 after the cut, got:\n${text}`);
   assert(text.includes('Lec_v.state=1'), `State Lec_v 1, got:\n${text}`);
   assert(text.includes('inventory=[4]'), `Remtol 1 removed the bottle, pistol remains, got:\n${text}`);
@@ -220,16 +248,20 @@ try {
   const after = await panel();
   console.log('\nFINAL DEBUG PANEL\n' + after);
   const trace = await evaluate('window.__audioTrace ?? []');
-  const starts = trace.filter((event) => event.event === 'source.start.ok');
-  assert(starts.length >= 2, `expected successful AudioBufferSourceNode starts for pistol and bottle, got ${JSON.stringify(trace)}`);
   const muteState = await evaluate('({ muted: window.__e2eAudioMuted === true, connections: window.__e2eAudioMuteCount ?? 0 })');
   if (process.env.E2E_MUTE_AUDIO === '0') assert(!muteState.muted && muteState.connections === 0, `E2E_MUTE_AUDIO=0 should preserve the audible Web Audio graph: ${JSON.stringify(muteState)}`);
-  else assert(muteState.muted && muteState.connections >= starts.length, `E2E should mute only output while preserving source.start(): ${JSON.stringify(muteState)}`);
+  else assert(muteState.muted && muteState.connections > 0, `E2E output mute was not installed in the disposable test tab: ${JSON.stringify(muteState)}`);
   console.log(`\nWEB AUDIO TRACE: ${JSON.stringify(trace)}`);
   console.log(`\nE2E AUDIO OUTPUT: ${JSON.stringify(muteState)} (muted=${process.env.E2E_MUTE_AUDIO !== '0'})`);
   const runtimeTrace = await evaluate('window.__audioDebug?.view()?.audio?.diagnostics?.() ?? []');
+  const originalSocket = await connect(originalPage.webSocketDebuggerUrl);
+  const originalMuteMarker = await originalSocket.send('Runtime.evaluate', { expression: 'window.__e2eAudioMuted === true', returnByValue: true });
+  assert(originalMuteMarker.result?.value !== true, 'E2E mute must not be installed in the pre-existing manual-game tab');
+  originalSocket.socket.close();
   console.log(`\nVOICE/BACKEND TRACE: ${JSON.stringify(runtimeTrace)}`);
   console.log('\nE2E LEVEL1 INTERACTIONS PASSED');
 } finally {
   socket.close();
+  await browser.send('Target.closeTarget', { targetId }).catch(() => {});
+  browser.socket.close();
 }
