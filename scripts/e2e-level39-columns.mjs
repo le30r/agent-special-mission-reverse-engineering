@@ -161,7 +161,9 @@ try {
   assert(snapshot.scene === 39, `still in Level39, got ${snapshot.scene}`);
   assert(snapshot.hero && Math.hypot(snapshot.hero.x - 505, snapshot.hero.y - 485) <= 16,
     `hero at the left column, got (${snapshot.hero?.x},${snapshot.hero?.y})`);
-  assert(snapshot.hero.depth >= 148 && snapshot.hero.depth <= 154, `mask depth at the reproduced position is ~152, got ${snapshot.hero.depth}`);
+  // The native-compatible movement stops before assigning the requested target;
+  // the final accepted point varies by a few mask pixels with real ticker cadence.
+  assert(snapshot.hero.depth >= 148 && snapshot.hero.depth <= 156, `mask depth near the reproduced position is ~152, got ${snapshot.hero.depth}`);
   assert(snapshot.hero.origin === 'mask(x,y)+Focus', `hero depth origin, got ${snapshot.hero.origin}`);
 
   const names = snapshot.objects.map((object) => object.name);

@@ -1,6 +1,8 @@
 export type SccCommand =
   | { op: 'Goto'; x: number; y: number }
   | { op: 'Start' | 'StartW'; name: string }
+  | { op: 'Setmsk'; path: string }
+  | { op: 'Block' | 'Ublock' }
   | { op: 'Stop'; name: string }
   | { op: 'Setxy'; x: number; y: number }
   | { op: 'Addtol'; id: number }
@@ -18,7 +20,7 @@ export type SccCommand =
   // Portal is parsed into scene metadata, never executed as an object command.
   // Level/Goport/Lstate are implemented with callbacks supplied by SceneLoader.
 export type SccProgram = { caseIndex: number; commands: SccCommand[] };
-export type SccHandler = { itemId: number; event: string; stateObject: string; programs: Map<number, SccProgram> };
+export type SccHandler = { itemId: number; event: string; stateObject: string; stateScene: number; programs: Map<number, SccProgram> };
 export type SccPortal = { direction: number; x: number; y: number };
 export type SccHost = {
   pathActive(): boolean;
@@ -35,27 +37,39 @@ export type SccHost = {
   hideObject?(name: string): void;
   /** `Setzon` writes one int into game-session state. */
   setZone?(zone: number): void;
+  setMask?(path: string): void;
+  setBlocked?(blocked: boolean): void;
   /** Optional navigation request used by SCC `Goto`/`Goport`. */
   goto?(x: number, y: number): boolean;
   level?(scene: number, portal: number): void;
   goport?(portal: number): boolean;
   lstate?(scene: number, name: string, value: number): void;
   /** Optional long-lived state store. Without them the interpreter keeps its own map. */
-  readState?(name: string): number;
+  readState?(name: string, scene?: number): number;
   writeState?(name: string, value: number): void;
 };
 type ProgramState = { program: SccProgram; active: boolean; waiting: boolean; pc: number; waitName?: string };
 
 const int = (value: string) => Number.parseInt(value, 10);
 
+/** `Start <anim> Fclick <event>` is a load-time property in the original parser. */
+export function parseFclickBindings(source: string): Map<string, string> {
+  const bindings = new Map<string, string>();
+  for (const line of source.split(/\r?\n/)) {
+    const match = /^\s*Start\s+(\S+)\s+Fclick\s+(\S+)\s*$/i.exec(line);
+    if (match) bindings.set(match[1], match[2]);
+  }
+  return bindings;
+}
+
 /** Parses the implemented SCC subset. Break is a load-time program separator, not an opcode. */
 export function parseScc(source: string): SccHandler[] {
   const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const handlers: SccHandler[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const click = lines[i].match(/^Click\s+(-?\d+)\s+(\S+)\s+(\S+)/i);
+    const click = lines[i].match(/^Click\s+(-?\d+)\s+(\S+)\s+(\S+)(?:\s+(-?\d+))?/i);
     if (!click) continue;
-    const handler: SccHandler = { itemId: int(click[1]), event: click[2], stateObject: click[3], programs: new Map() };
+    const handler: SccHandler = { itemId: int(click[1]), event: click[2], stateObject: click[3], stateScene: click[4] === undefined ? -1 : int(click[4]), programs: new Map() };
     while (i + 1 < lines.length && lines[i + 1] !== '{') i++;
     i++;
     let current: SccProgram | undefined;
@@ -78,7 +92,9 @@ export function parseScc(source: string): SccHandler[] {
       if (!current) continue;
       const commands = current.commands;
       if (word === 'goto' || word === 'setxy') commands.push({ op: word === 'goto' ? 'Goto' : 'Setxy', x: int(tokens[1]), y: int(tokens[2]) });
-      else if (word === 'start' || word === 'startw') commands.push({ op: word === 'start' ? 'Start' : 'StartW', name: tokens[1] });
+      else if (word === 'start' || word === 'startw' || word === 'statrw') commands.push({ op: word === 'start' ? 'Start' : 'StartW', name: tokens[1] });
+      else if (word === 'setmsk') commands.push({ op: 'Setmsk', path: tokens[1] });
+      else if (word === 'block' || word === 'ublock') commands.push({ op: word === 'block' ? 'Block' : 'Ublock' });
       else if (word === 'stop') commands.push({ op: 'Stop', name: tokens[1] });
       else if (word === 'addtol') commands.push({ op: 'Addtol', id: int(tokens[1]) });
       else if (word === 'remtol') commands.push({ op: 'Remtol', id: int(tokens[1]) });
@@ -105,17 +121,15 @@ export class SccRuntime {
   /** Long-lived inventory may be supplied so it survives a scene runtime rebuild. */
   readonly inventory: number[];
   readonly handlers: SccHandler[];
+  readonly fclickBindings: Map<string, string>;
   readonly programs: ProgramState[] = [];
   /** Game-session zone written by `Setzon`; owned by SceneLoader when a host provides it. */
   zone = 0;
   busy = false;
   constructor(source: string, readonly host: SccHost, inventory: number[] = []) {
     this.handlers = parseScc(source);
+    this.fclickBindings = parseFclickBindings(source);
     this.inventory = inventory;
-  }
-
-  private readState(name: string): number {
-    return this.host.readState?.(name) ?? this.states.get(name) ?? 0;
   }
 
   /** A pointer/object interaction cancels every currently active Program. */
@@ -133,7 +147,7 @@ export class SccRuntime {
     let found = false;
     for (const handler of this.handlers) {
       if (handler.event !== event || handler.itemId !== selectedItem) continue;
-      const state = this.readState(handler.stateObject);
+      const state = this.host.readState?.(handler.stateObject, handler.stateScene) ?? this.states.get(handler.stateObject) ?? 0;
       const program = handler.programs.get(state);
       if (!program) continue;
       found = true;
@@ -180,6 +194,9 @@ export class SccRuntime {
         this.busy = false; state.waiting = false; state.waitName = undefined; state.pc++; continue;
       }
       if (command.op === 'Start') { this.host.startAnimation(command.name); state.pc++; continue; }
+      if (command.op === 'Setmsk') { this.host.setMask?.(command.path); state.pc++; continue; }
+      if (command.op === 'Block') { this.host.setBlocked?.(true); state.pc++; continue; }
+      if (command.op === 'Ublock') { this.host.setBlocked?.(false); state.pc++; continue; }
       // Opcode 0x15: findAnimation, then 0x404fb4(anim, 0) — deactivate and frame=1.
       if (command.op === 'Stop') { this.host.stopAnimation?.(command.name); state.pc++; continue; }
       if (command.op === 'Setxy') { this.host.setPosition(command.x, command.y); state.pc++; continue; }

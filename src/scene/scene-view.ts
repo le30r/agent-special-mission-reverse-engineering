@@ -33,6 +33,8 @@ export type SceneViewHooks = {
   lstate(scene: number, name: string, value: number): void;
   /** SCC `Setzon` stores its int in game-session state. */
   setZone(zone: number): void;
+  /** State-only lookup that must not allocate an unvisited target scene. */
+  readState?(scene: number, name: string): number;
 };
 
 /**
@@ -67,6 +69,8 @@ export class SceneView {
   private readonly latchedSounds = new Set<number>();
   private readonly soundEventsById = new Map<number, FrameSoundEvent>();
   private readonly activeBarriers = new Map<string, number>();
+  private activeMask: SceneDefinition['mask'];
+  private inputBlocked = false;
 
   constructor(
     readonly definition: SceneDefinition,
@@ -76,6 +80,7 @@ export class SceneView {
     inventory: number[],
     audioBackend?: BrowserAudioBackend,
   ) {
+    this.activeMask = definition.mask;
     this.heroPosition = [0, 0];
     this.heroDirection = state.savedDirection;
     this.backdrop = new Sprite(background);
@@ -107,11 +112,15 @@ export class SceneView {
       showObject: (name) => this.setObjectVisible(name, true),
       hideObject: (name) => this.setObjectVisible(name, false),
       setZone: (zone) => hooks.setZone(zone),
+      setMask: (path) => this.setNavigationMask(path),
+      setBlocked: (blocked) => { this.inputBlocked = blocked; },
       goto: (x, y) => this.goto(x, y),
       goport: (portal) => this.goport(portal),
       level: (scene, portal) => hooks.level(scene, portal),
       lstate: (scene, name, value) => hooks.lstate(scene, name, value),
-      readState: (name) => this.state.objects.get(name)?.state ?? 0,
+      readState: (name, scene = -1) => scene === -1 || scene === this.definition.id
+        ? this.state.objects.get(name)?.state ?? 0
+        : hooks.readState?.(scene, name) ?? 0,
       writeState: (name, value) => {
         const object = this.state.objects.get(name);
         if (object) object.state = value;
@@ -125,7 +134,20 @@ export class SceneView {
     this.applyStoredObjectVisuals();
   }
 
-  private get mask() { return this.definition.mask; }
+  private get mask() { return this.activeMask; }
+  get blocked(): boolean { return this.inputBlocked; }
+  get activeMaskPath(): string {
+    return this.activeMask === this.definition.mask
+      ? this.definition.initialMaskPath
+      : [...(this.definition.masks ?? new Map())].find(([, mask]) => mask === this.activeMask)?.[0] ?? '';
+  }
+
+  private setNavigationMask(path: string): void {
+    const key = normalizeExternalPath(path);
+    const mask = this.definition.masks?.get(key);
+    if (!mask) throw new Error(`Setmsk resource was not prepared for scene ${this.definition.id}: ${path}`);
+    this.activeMask = mask;
+  }
   private get focus() { return this.definition.focus; }
   private get layoutFile(): MultFile | undefined {
     const name = this.definition.layoutAnimation;
@@ -461,6 +483,12 @@ export class SceneView {
       if (event.frameChanged || state.active) {
         this.applyAnimationFrame(event.name, state.frame, 'animation-update', sound?.objects);
       } else this.traceVisual('Mainhero', this.hero, event.name, state.frame, 'animation-update');
+      // Natural one-shot completion is the animation scheduler's synchronous
+      // internal event path. Stop and Animc never reach this inactive terminal.
+      if (!event.active && !event.frameChanged && !state.active) {
+        const completionEvent = this.definition.completionEvents?.get(event.name);
+        if (completionEvent) this.scc.dispatch(completionEvent, 0);
+      }
     });
     if (this.movement) this.advanceMovement(elapsedNow);
     if (!this.heroIsObjectSpace) {
@@ -574,6 +602,10 @@ export class SceneView {
   pointerDown(screenX: number, screenY: number): void {
     if (this.scc.busy) return;
     const selectedItem = this.selectedItem;
+    if (this.inputBlocked) {
+      this.scc.dispatch('Plane', selectedItem);
+      return;
+    }
     for (const [name, declaration] of this.definition.active) {
       if (!declaration.rect) continue;
       const target = { visible: this.activeVisible(name), rect: declaration.rect };
@@ -618,7 +650,7 @@ export class SceneView {
   /** Selects an inventory item for the next scene click (`scene+5`). */
   selectItem(id: number): void { this.selectedItem = id; }
 
-  status(): { scene: number; position: Point; direction: number; depth: number; scale: number; scroll: number; objects: number; inventory: number[]; selectedItem: number; active: Record<string, boolean> } {
+  status(): { scene: number; position: Point; direction: number; depth: number; scale: number; scroll: number; objects: number; inventory: number[]; selectedItem: number; active: Record<string, boolean>; blocked: boolean; busy: boolean; activeMaskPath: string } {
     return {
       scene: this.definition.id,
       position: this.heroPosition,
@@ -630,6 +662,9 @@ export class SceneView {
       inventory: [...this.scc.inventory],
       selectedItem: this.selectedItem,
       active: Object.fromEntries([...this.definition.active.keys()].map((name) => [name, this.activeVisible(name)])),
+      blocked: this.inputBlocked,
+      busy: this.scc.busy,
+      activeMaskPath: this.activeMaskPath,
     };
   }
 

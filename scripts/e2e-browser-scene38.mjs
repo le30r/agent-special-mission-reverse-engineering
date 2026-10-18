@@ -158,6 +158,10 @@ try {
   assert(text.includes('init=[1:1,38:1]'), `Level38 Init ran exactly once, got:\n${text}`);
   assert(text.includes('inventory=[]'), `inventory stays empty after the cut, got:\n${text}`);
   assert(text.includes('Goto_1=1/v'), `Lstate Goto_1 1 38 seeded the Level38 Active, got:\n${text}`);
+  // Level38 now correctly honors its Pank cutscene input lock. Its natural
+  // Bandit2_Lora WAV-gated Fclick must release Block before the portal is usable.
+  text = await waitForPanel('blocked=false', 45000);
+  assert(text.includes('Pank=1'), `Level38 Bandit callback completed before the return click, got:\n${text}`);
   const placeholders = /lstate\.placeholders=\[([^\]]*)\]/.exec(text)?.[1] ?? '';
   assert(placeholders.includes('44:') && placeholders.includes('To_38=1') && placeholders.includes('Interface=1'),
     `Lstate To_38 1 44 / Interface 1 44 placeholders, got:\n${text}`);

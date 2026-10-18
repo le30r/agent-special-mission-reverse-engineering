@@ -142,12 +142,11 @@ for (const file of await walk(source)) {
 
 /** Copy masks, backgrounds and every declared animation MULT. */
 for (const scene of discovery.scenes) {
-  for (const resource of [scene.mask, scene.background]) {
-    if (!resource) continue;
-    if (await copyIfChanged(path.join(source, resource.sourcePath), path.join(output, resource.sourcePath))) {
-      if (resource === scene.mask) copied.mask++;
-      else copied.background++;
-    }
+  for (const resource of scene.masks) {
+    if (await copyIfChanged(path.join(source, resource.sourcePath), path.join(output, resource.sourcePath))) copied.mask++;
+  }
+  if (scene.background && await copyIfChanged(path.join(source, scene.background.sourcePath), path.join(output, scene.background.sourcePath))) {
+    copied.background++;
   }
   for (const animation of scene.animations) {
     if (!animation.sourcePath) continue;
@@ -232,12 +231,21 @@ for (const scene of discovery.scenes) {
   if (scene.mask && !maskExists) {
     required.push({ kind: 'mask', originalPath: scene.mask.originalPath, sourcePath: scene.mask.sourcePath, required: true, message: `Mask copy failed for Level${scene.id}` });
   }
+  const masks = {};
+  for (const resource of scene.masks) {
+    const exists = existsSync(path.join(output, resource.sourcePath));
+    if (!exists && resource.originalPath !== scene.mask?.originalPath) {
+      required.push({ kind: 'mask', originalPath: resource.originalPath, sourcePath: resource.sourcePath, required: true, message: `Alternative mask copy failed for Level${scene.id}` });
+    }
+    if (exists) masks[normalizeOriginalPath(resource.originalPath)] = `/resources/${resource.sourcePath}`;
+  }
   scenes.push({
     id: scene.id,
     scc: `/resources/${scene.sccFileName}`,
     includes: scene.includes.map((include) => `/resources/${path.basename(include.sourcePath)}`),
     background: backgroundExists ? `/${backgroundRelative}` : null,
     mask: maskExists ? `/resources/${scene.mask.sourcePath}` : null,
+    masks,
     animations,
     externalImages,
     layoutAnimation: scene.layoutAnimation ?? null,
