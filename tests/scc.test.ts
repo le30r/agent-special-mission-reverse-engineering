@@ -2,7 +2,85 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decodeMult } from '../src/mult/decoder';
-import { SccRuntime, parseFclickBindings, parseScc, type SccHost } from '../src/scc/runtime';
+import { SccRuntime, parseFaultLists, parseFclickBindings, parseScc, selectFaultVoiceIndex, type SccHost } from '../src/scc/runtime';
+
+describe('SCC Fault declarations and selection', () => {
+  it('parses the original Level1, Level17, and Level29 declarations exactly', async () => {
+    const scripts = path.join(process.cwd(), 'agent-original/game-installed/Program_Executable_Files/Scripts');
+    const level1 = parseFaultLists(await readFile(path.join(scripts, 'Level1.scc'), 'utf8'), 1);
+    expect(level1.lists[0]).toMatchObject({ objectName: 'Morda', voices: ['SOUND\\scn_01\\otboy\\otd_001.wav'] });
+    const level17 = parseFaultLists(await readFile(path.join(scripts, 'Level17.scc'), 'utf8'), 17);
+    expect(level17.lists.find((list) => list.objectName === 'New_janitor1')?.voices).toEqual(['SOUND\\scn_17\\otboy\\Sound042.wav']);
+    expect(level17.diagnostics.some((diagnostic) => diagnostic.includes('derived scanner-state compatibility'))).toBe(true);
+    const level29 = parseFaultLists(await readFile(path.join(scripts, 'Level29.scc'), 'utf8'), 29);
+    expect(level29.lists.find((list) => list.objectName === 'Janitor')?.voices).toEqual([
+      'Sound\\scn_29\\konst\\002.wav', 'Sound\\scn_29\\otboy\\Sound065.wav',
+    ]);
+  });
+
+  it('preserves declaration order, duplicate names, duplicate paths, and multiline resources', () => {
+    const parsed = parseFaultLists([
+      'Fault Janitor 2 Sound\\scn_29\\konst\\002.wav',
+      '  Sound\\scn_29\\otboy\\Sound065.wav',
+      'Fault Janitor 1 Sound\\scn_29\\konst\\002.wav',
+      'Fault Duplicates 2 a.wav a.wav',
+      'Click 0 Janitor Janitor',
+    ].join('\n'));
+    expect(parsed.diagnostics).toEqual([]);
+    expect(parsed.lists).toEqual([
+      { objectName: 'Janitor', voices: ['Sound\\scn_29\\konst\\002.wav', 'Sound\\scn_29\\otboy\\Sound065.wav'], line: 1 },
+      { objectName: 'Janitor', voices: ['Sound\\scn_29\\konst\\002.wav'], line: 3 },
+      { objectName: 'Duplicates', voices: ['a.wav', 'a.wav'], line: 4 },
+    ]);
+  });
+
+  it('uses the original biased rand15 formula and rejects unsafe lists/counts', () => {
+    expect([0, 8191, 8192, 32767].map((value) => selectFaultVoiceIndex(2, value))).toEqual([0, 0, 1, 1]);
+    expect([0, 32767].map((value) => selectFaultVoiceIndex(1, value))).toEqual([0, 0]);
+    expect(selectFaultVoiceIndex(0, 0)).toBeUndefined();
+    expect(selectFaultVoiceIndex(2, 32768)).toBeUndefined();
+    expect(parseFaultLists('Fault Bad nope.wav\nFault Empty 2 only.wav\nFault Overflow 11 a.wav').diagnostics).toHaveLength(3);
+  });
+
+  it('keeps Level17 line 127 as one explicit derived compatibility case only', () => {
+    const source = `${'Fault Prior 1 prior.wav\n'.repeat(126)}Fault New_janitor1 SOUND\\scn_17\\otboy\\Sound042.wav`;
+    const parsed = parseFaultLists(source, 17);
+    expect(parsed.lists.at(-1)).toMatchObject({ objectName: 'New_janitor1', voices: ['SOUND\\scn_17\\otboy\\Sound042.wav'] });
+    expect(parsed.diagnostics.at(-1)).toContain('derived scanner-state compatibility');
+    expect(parseFaultLists('Fault Other voice.wav', 18).lists).toEqual([]);
+  });
+
+  it('runs the synthetic Fault program through the SCC executor and native no-route Speak special case', () => {
+    const events: string[] = [];
+    let moving = false, speaking = false;
+    const runtime = new SccRuntime('', {
+      pathActive: () => moving,
+      animationActive: () => speaking,
+      startAnimation: (name) => { events.push(`StartW:${name}`); speaking = true; },
+      setPosition: (x, y) => events.push(`Setxy:${x},${y}`),
+      setDepth: () => {},
+      goto: (x, y) => { events.push(`Goto:${x},${y}`); moving = true; return true; },
+    });
+    runtime.dispatchFault(125, 300);
+    expect(runtime.programs.at(-1)).toMatchObject({ active: true, waiting: true, pc: 0 });
+    moving = false; runtime.tick();
+    expect(events).toEqual(['Goto:125,300', 'Setxy:125,300', 'StartW:Speak']);
+    expect(runtime.busy).toBe(true);
+    speaking = false; runtime.tick();
+    expect(events).toEqual(['Goto:125,300', 'Setxy:125,300', 'StartW:Speak', 'Setxy:125,300']);
+    expect(runtime.busy).toBe(false);
+
+    const noRoute: string[] = [];
+    const fallback = new SccRuntime('', {
+      pathActive: () => false, animationActive: () => false,
+      startAnimation: (name) => noRoute.push(`StartW:${name}`),
+      setPosition: (x, y) => noRoute.push(`Setxy:${x},${y}`), setDepth: () => {},
+      goto: () => false,
+    });
+    fallback.dispatchFault(9, 10);
+    expect(noRoute).toEqual(['StartW:Speak']);
+  });
+});
 
 describe('cooperative SCC runtime', () => {
   it('parses Break at load time and suspends/resumes the bottle program in source order', async () => {
