@@ -150,7 +150,8 @@ try {
   await sleep(300);
   await logicalClick(577, 68);
   await sleep(300);
-  text = await panel();
+  await logicalClick(450, 300); // close outside the panel and commit scene selection
+  text = await waitForPanel('selected=1');
   assert(text.includes('selected=1'), `bottle selected from inventory, got:\n${text}`);
 
   // 5) Cut the hammock with the selected bottle.
@@ -183,14 +184,17 @@ try {
   await sleep(300);
   await logicalClick(517, 68);
   await sleep(300);
-  text = await panel();
+  await logicalClick(450, 300); // close outside the panel and commit scene selection
+  text = await waitForPanel('selected=4');
   assert(text.includes('selected=4'), `pistol selected, got:\n${text}`);
 
   // 8) Click Pank with the pistol -> Victoti fight -> State Pank 2 / State Lora 1.
   const pank = await objectWorld('Pank');
   assert(pank && pank.width > 0, `Pank rendered before the fight`);
   const pankScroll = scrollOf(text);
-  await logicalClick(pank.x - pankScroll, pank.y);
+  // The animated sprite's geometric center is transparent; use a stable opaque
+  // torso pixel within its real hit mask.
+  await logicalClick(pank.x - pankScroll + 20, pank.y - 20);
   text = await waitForPanel('Pank=2', 90000);
   assert(text.includes('Lora=1'), `State Lora 1 after the fight, got:\n${text}`);
   assert(text.includes('selected=0'), `selected item cleared after use, got:\n${text}`);

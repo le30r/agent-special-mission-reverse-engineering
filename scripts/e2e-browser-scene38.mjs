@@ -133,7 +133,8 @@ try {
   await sleep(300);
   await logicalClick(517, 68);
   await sleep(300);
-  text = await panel();
+  await logicalClick(450, 300); // click outside the inventory to commit pending item
+  text = await waitForPanel('selected=1');
   assert(text.includes('selected=1'), `bottle selected from inventory, got:\n${text}`);
 
   // 4) Cut the hammock with the real selected item.

@@ -235,6 +235,20 @@ try {
   await logicalClick(577, 68); // slot 1 because pistol is slot 0
   await sleep(300);
   text = await panel();
+  assert(text.includes('inventory=[4,1]') && text.includes('selected=0'), `pending bottle choice leaves scene selection unchanged, got:\n${text}`);
+  const pendingInventory = await evaluate('window.__inventoryDebug?.view?.()');
+  assert(pendingInventory?.open && pendingInventory.pendingSelection === 1, `first click records pending item 1 without closing the panel, got ${JSON.stringify(pendingInventory)}`);
+  await screenshot('06-inventory-pending-bottle.png');
+  await logicalClick(450, 300); // click just outside the left panel edge to close and commit scene+5
+  await sleep(300);
+  const immediateSelection = await evaluate('window.__sccDebug?.view?.()?.selectedItem ?? null');
+  if (immediateSelection !== 1) {
+    const inventoryAfterClose = await evaluate('window.__inventoryDebug?.view?.()');
+    throw new Error(`inventory close did not transfer pending item 1; selected=${String(immediateSelection)}; inventory=${JSON.stringify(inventoryAfterClose)}; panel=${await panel()}`);
+  }
+  const sceneSelection = await waitFor('SceneView selected item 1', async () => await evaluate('window.__sccDebug?.view?.()?.selectedItem') === 1);
+  text = await waitForPanel('selected=1');
+  assert(sceneSelection, 'pending bottle selection transferred to the active scene');
   assert(text.includes('selected=1'), `bottle selected from inventory, got:\n${text}`);
   const scroll = scrollOf(text);
   const slipScreenX = 303.18 - scroll;

@@ -64,9 +64,11 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
-  if (from < 0) throw new Error(`Unknown E2E suite start: ${startAt}`);
-  for (const script of suite.slice(from)) {
+  if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
+  const scripts = startAt && from < 0 ? [startAt] : suite.slice(from);
+  for (const script of scripts) {
     console.log(`\n===== Chromium E2E: ${script} =====`);
     const profile = await mkdtemp(path.join(os.tmpdir(), 'agent-revers-chromium-'));
     chromeChild = start(chrome, [
@@ -82,7 +84,7 @@ try {
     const chromeIndex = children.indexOf(finishedChrome);
     if (chromeIndex >= 0) children.splice(chromeIndex, 1);
   }
-  console.log(`\nAll ${suite.length} Chromium E2E scripts passed.`);
+  console.log(`\nAll ${scripts.length} Chromium E2E scripts passed.`);
 } finally {
   await stop(chromeChild);
   for (const child of children.reverse()) if (child.exitCode === null) child.kill('SIGTERM');

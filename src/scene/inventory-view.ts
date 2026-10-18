@@ -6,6 +6,24 @@ import { INVENTORY_LAYOUT, inventorySlotOrigin, itemAtInventoryPosition } from '
 const TAB = { x: 690, y: 566, width: 100, height: 28 };
 const CLOSE = { x: 770, y: 6, width: 24, height: 24 };
 
+/** Native 0x40eacc table. Keys are directional: first * 1000 + second. */
+export const COMBINE: readonly (readonly [number, number])[] = Object.freeze([
+  [5002, 39], [2005, 39],
+  [9010, 40], [10009, 40],
+  [33034, 49], [34033, 49],
+  [49031, 50], [31049, 50],
+  [49032, 51], [32049, 51],
+  [45042, 46], [42045, 46],
+].map(([key, result]) => Object.freeze([key, result] as const)));
+
+export type InventoryPointerResult = {
+  handled: boolean;
+  /** Item to commit to SceneView.selectedItem when the panel closes. */
+  selectedItem?: number;
+  /** The inventory tab cancels an existing scene selection instead of opening. */
+  cancelSceneSelection?: boolean;
+};
+
 /**
  * Normal inventory UI built from the original interface resources: 340x600
  * `Frame.MULT` panel and `large.MULT` item icons in the recovered 4x5 grid.
@@ -19,7 +37,7 @@ export class InventoryView {
   private readonly icons = new Container();
   private readonly tab = new Container();
   private items: number[] = [];
-  private selected = 0;
+  pendingSelection = 0;
   open = false;
 
   constructor(
@@ -75,6 +93,12 @@ export class InventoryView {
       const [x, y] = inventorySlotOrigin(ordinal);
       sprite.position.set(x + resolved.source.x, y + resolved.source.y);
       this.icons.addChild(sprite);
+      if (id === this.pendingSelection) {
+        // Minimal browser adaptation: the EXE highlight treatment is not established.
+        const outline = new Graphics().rect(x + 2, y + 2, INVENTORY_LAYOUT.slotWidth - 4, INVENTORY_LAYOUT.slotHeight - 4)
+          .stroke({ color: 0xffd35a, width: 2 });
+        this.icons.addChild(outline);
+      }
     });
   }
 
@@ -84,33 +108,52 @@ export class InventoryView {
     this.tab.visible = !open;
   }
 
-  /**
-   * Raw logical screen click. Returns true when the inventory consumed it; a
-   * selected slot closes the panel and is returned by `consumeSelection`.
-   */
-  pointerDown(x: number, y: number): boolean {
-    if (!this.open) {
-      const insideTab = x >= TAB.x && x <= TAB.x + TAB.width && y >= TAB.y && y <= TAB.y + TAB.height;
-      if (!insideTab) return false;
-      this.setOpen(true);
-      return true;
-    }
-    const insideClose = x >= CLOSE.x && x <= CLOSE.x + CLOSE.width && y >= CLOSE.y && y <= CLOSE.y + CLOSE.height;
-    if (insideClose) { this.setOpen(false); return true; }
-    const id = itemAtInventoryPosition(this.items, x, y);
-    if (id > 0) {
-      this.selected = id;
-      this.setOpen(false);
-      return true;
-    }
-    // A click outside the panel closes it; clicks over the panel do not reach the scene.
-    if (x < INVENTORY_LAYOUT.panelX || x > INVENTORY_LAYOUT.panelX + INVENTORY_LAYOUT.panelWidth) this.setOpen(false);
-    return true;
+  private closePanel(): number {
+    this.setOpen(false);
+    const selectedItem = this.pendingSelection;
+    this.pendingSelection = 0;
+    this.drawIcons();
+    return selectedItem;
   }
 
-  consumeSelection(): number {
-    const selected = this.selected;
-    this.selected = 0;
-    return selected;
+  /** Raw logical screen click; mutates the existing SceneLoader inventory array. */
+  pointerDown(x: number, y: number, inventory: number[], sceneSelectedItem = 0): InventoryPointerResult {
+    if (!this.open) {
+      const insideTab = x >= TAB.x && x <= TAB.x + TAB.width && y >= TAB.y && y <= TAB.y + TAB.height;
+      if (!insideTab) return { handled: false };
+      if (sceneSelectedItem > 0) return { handled: true, cancelSceneSelection: true };
+      this.setOpen(true);
+      this.pendingSelection = 0;
+      this.drawIcons();
+      return { handled: true };
+    }
+    const insideClose = x >= CLOSE.x && x <= CLOSE.x + CLOSE.width && y >= CLOSE.y && y <= CLOSE.y + CLOSE.height;
+    if (insideClose) return { handled: true, selectedItem: this.closePanel() };
+    const id = itemAtInventoryPosition(inventory, x, y);
+    if (id > 0) {
+      if (this.pendingSelection < 1) {
+        this.pendingSelection = id;
+        this.drawIcons();
+      } else {
+        const first = this.pendingSelection;
+        const result = COMBINE.find(([key]) => key === id * 1000 + first)?.[1] ?? 0;
+        // A miss is a native no-op: keep the original pending selection.
+        // Confirm both ingredients exist before changing the canonical inventory.
+        if (result > 0 && inventory.includes(id) && inventory.includes(first)) {
+          for (let i = inventory.length - 1; i >= 0; i--) {
+            if (inventory[i] === id || inventory[i] === first) inventory.splice(i, 1);
+          }
+          inventory.push(result);
+          this.pendingSelection = 0;
+          this.setItems(inventory);
+        }
+      }
+      return { handled: true };
+    }
+    // A click outside the panel closes it; clicks over the panel do not reach the scene.
+    if (x < INVENTORY_LAYOUT.panelX || x > INVENTORY_LAYOUT.panelX + INVENTORY_LAYOUT.panelWidth) {
+      return { handled: true, selectedItem: this.closePanel() };
+    }
+    return { handled: true };
   }
 }
