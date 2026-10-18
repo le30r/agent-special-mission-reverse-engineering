@@ -610,7 +610,6 @@ export class SceneView {
     }
     // The original clears active Programs even when no object was hit (0x40a1bc).
     this.scc.cancelActive();
-    this.audio.dispose();
     // `scene+5 != 0` suppresses click-to-walk; the selected item is only consumed
     // by a handled object event.
     if (selectedItem !== 0) return;
@@ -735,6 +734,7 @@ export class SceneView {
    */
   dispose(): void {
     this.scc.cancelActive();
+    this.audio.dispose();
     for (const name of this.player.states.keys()) this.player.stop(name);
     this.movement = undefined;
     this.state.savedPosition = [this.heroPosition[0], this.heroPosition[1]];
