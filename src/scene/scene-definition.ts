@@ -1,5 +1,6 @@
 import { decodeMult, type MultFile, type MultObject } from '../mult/decoder';
 import { parseAnimationDeclarations, AnimationPlayer } from '../animation/player';
+import { parseFclickBindings } from '../scc/runtime';
 import { parseSceneDeclarations, parseFrameDepthEvents, type FrameDepthEvent, type SceneObjectDeclaration } from '../navigation/depth-sort';
 import type { NavigationMask } from '../navigation/router';
 import type { SccPortal } from '../scc/runtime';
@@ -22,6 +23,10 @@ export type SceneDefinition = {
   scc: string;
   background: string;
   mask: NavigationMask;
+  /** All Setmsk targets referenced by this scene, indexed by normalized SCC path. */
+  masks: Map<string, NavigationMask>;
+  initialMaskPath: string;
+  completionEvents?: Map<string, string>;
   focus: readonly [number, number, number];
   portals: SccPortal[];
   objects: Map<string, SceneObjectDeclaration>;
@@ -53,6 +58,7 @@ export type SceneDefinitionInput = {
   mainheroScc?: string;
   background: string;
   mask: NavigationMask;
+  masks?: ReadonlyMap<string, NavigationMask>;
   mults: ReadonlyMap<string, Uint8Array | ArrayBuffer | MultFile>;
   externalImages?: Readonly<Record<string, string>>;
   layoutAnimation?: string;
@@ -129,6 +135,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
   // equivalent and keeps scene-local declarations authoritative.
   const rateSources = [...includeSources, ...(mainheroScc ? [mainheroScc] : []), scc];
   const declarationSource = [...includeSources, scc].join('\n');
+  const initialMaskPath = /^\s*Mask\s+(\S+)/im.exec(scc)?.[1] ?? '';
   const declarations = parseSceneDeclarations(declarationSource);
   const rates = parseAnimationDeclarations(...rateSources);
   const warnings: string[] = [];
@@ -172,6 +179,9 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     scc,
     background,
     mask,
+    masks: new Map([...(input.masks ?? new Map()).entries()].map(([path, value]) => [normalizeExternalPath(path), value])),
+    initialMaskPath: normalizeExternalPath(initialMaskPath),
+    completionEvents: parseFclickBindings(declarationSource),
     focus: parseFocus(scc),
     portals: parsePortals(scc),
     objects: declarations.objects,

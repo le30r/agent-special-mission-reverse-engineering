@@ -61,7 +61,7 @@ function describeSession(session: SceneSession, manifest: { summary: { total: nu
     `scc=${definition.sccUrl}`,
     `entry=${entryLabel} · pos=(${Math.round(status.position[0])},${Math.round(status.position[1])}) dir=${status.direction} · mask correction=${entry?.snapRadius ?? 0}/${entry?.snapAngleIndex ?? 0}`,
     `scene=${definition.mask.width}x${definition.mask.height} focus=${definition.focus.join(' ')} portals=${definition.portals.length} animations=${definition.animations.size} layout=${definition.layoutAnimation ?? 'none'}`,
-    `hero: depth=${status.depth} scale=${status.scale.toFixed(4)} scroll=${status.scroll} objects=${status.objects}`,
+    `hero: depth=${status.depth} scale=${status.scale.toFixed(4)} scroll=${status.scroll} objects=${status.objects} · scc.busy=${status.busy} blocked=${status.blocked} mask=${status.activeMaskPath}`,
     `session: zone=${session.loader.game.zone} init=[${initRuns || 'none'}] transitions=[${session.transitionLog.join(' ')}] resources.loadedScenes=${provider.loadedCount}`,
     `audio voices: ${view.audioReport() || 'none'}`,
     `lstate.placeholders=[${lstatePlaceholders}]`,
@@ -144,7 +144,11 @@ async function main() {
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
-  if (sceneDebug) (window as Window & { __audioDebug?: unknown }).__audioDebug = { backend: audioBackend, view: () => session.view };
+  if (sceneDebug) {
+    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown };
+    debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
+    debugWindow.__sccDebug = { session, view: () => session.view };
+  }
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
   session.flush();

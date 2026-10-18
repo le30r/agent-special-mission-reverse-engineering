@@ -233,6 +233,7 @@ export class SceneSession {
       level: (nextScene, nextPortal) => this.request(nextScene, nextPortal),
       lstate: (targetScene, name, value) => this.loader.lstate(targetScene, name, value),
       setZone: (zone) => { this.loader.game.zone = zone; },
+      readState: (targetScene, name) => this.loader.readState(targetScene, name),
     };
     const switched = this.loader.enterPending(
       (state: SceneState, runtime) => {

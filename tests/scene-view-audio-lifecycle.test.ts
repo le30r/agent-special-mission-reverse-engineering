@@ -92,6 +92,26 @@ describe('SceneView WAV ownership', () => {
   });
 });
 
+describe('SCC Block input routing', () => {
+  it('dispatches Plane without falling through to click-to-walk', async () => {
+    const catalog = await catalogPromise;
+    const source = `Click 0 Lock Interface\n{\n Case 0\n  Block\n Break\n}\nClick 0 Plane Interface\n{\n Case 0\n  Addtol 99\n Break\n}`;
+    const definition = { ...catalogDefinition(catalog, 1), scc: source };
+    const view = new SceneView(definition, createSceneState(1), Texture.EMPTY, hooks, []);
+    view.placeHero({ position: [1199, 524], direction: 6, source: 'init', depth: 0, scale: 1, scroll: 599, snapRadius: 0, snapAngleIndex: 0 });
+    view.scc.dispatch('Lock');
+    expect(view.blocked).toBe(true);
+    expect(view.status().position).toEqual([1199, 524]);
+
+    view.pointerDown(790, 590); // Empty scene point; normal handling would start a route.
+
+    expect(view.scc.inventory).toEqual([99]);
+    expect(view.blocked).toBe(true);
+    expect(view.status().position).toEqual([1199, 524]);
+    view.dispose();
+  });
+});
+
 // Use the actual SceneView scheduler and real corpus declarations. Only rendering
 // and the audio device are replaced; cursor/latch/Stop behavior is production code.
 type SchedulerView = {
