@@ -2,7 +2,7 @@ import { Texture } from 'pixi.js';
 import { composeMultForCanvas, type MultFile, type MultObject, type ResolvedMultObject } from '../mult/decoder';
 
 /**
- * MULT textures are shared by all scenes. The cache key therefore includes a
+ * MULT textures belong to one loaded scene definition. The cache key includes a
  * per-file identity: several original MULT files (stop0..stop7) have the same
  * frame count, slot, child and record offset but different pixels.
  */
@@ -35,46 +35,97 @@ export function resolvedTexture(file: MultFile, frame: number, record: MultObjec
   return texture;
 }
 
-export type ExternalTexture = { texture: Texture; hitPixels: Uint8ClampedArray; width: number; height: number };
-const externalTextures = new Map<string, ExternalTexture>();
-
-function externalKey(externalPath: string): string {
-  return externalPath.replaceAll('\\', '/').replace(/^Tzu\//i, 'block9/Tzu/').toLowerCase();
-}
-
-/** Synchronous lookup used while a scene view is built at the game-loop boundary. */
-export function cachedExternalTexture(externalPath: string): ExternalTexture | undefined {
-  return externalTextures.get(externalKey(externalPath));
-}
-
-/** Loads every external image a scene needs before its view is created. */
-export async function preloadExternalTextures(paths: Iterable<string>, resources: string): Promise<void> {
-  for (const externalPath of new Set(paths)) {
-    if (!cachedExternalTexture(externalPath)) await externalTexture(externalPath, resources);
+/** Destroys all GPU textures created from one scene's MULT file. */
+export function releaseMultTextures(file: MultFile): void {
+  const id = fileIds.get(file);
+  if (!id) return;
+  const prefix = `${id}:`;
+  for (const [key, texture] of multTextures) {
+    if (!key.startsWith(prefix)) continue;
+    if (texture !== Texture.EMPTY) texture.destroy(true);
+    multTextures.delete(key);
   }
+  fileIds.delete(file);
 }
 
-/**
- * Serves an original external image through the PNG conversion prepared for it.
- * The original hit test uses the RGB color key 0xB5B5B5, so those pixels become
- * fully transparent for click geometry.
- */
-export async function externalTexture(externalPath: string, resources: string): Promise<ExternalTexture> {
-  const normalized = externalPath.replaceAll('\\', '/').replace(/^Tzu\//i, 'block9/Tzu/');
-  const key = externalKey(externalPath);
-  const cached = externalTextures.get(key);
-  if (cached) return cached;
-  const url = `${resources}/${normalized.replace(/\.tif{1,2}$/i, '.png')}`;
-  const image = new Image(); image.src = url;
+export type ExternalTexture = { texture: Texture; hitPixels: Uint8ClampedArray; width: number; height: number };
+type ExternalRecord = { entry: ExternalTexture; refs: number };
+const externalTextures = new Map<string, ExternalRecord>();
+
+/** Synchronous borrowed lookup used while a scene view is built. */
+export function cachedExternalTexture(url: string): ExternalTexture | undefined {
+  return externalTextures.get(url)?.entry;
+}
+
+async function loadExternalTexture(url: string): Promise<ExternalTexture> {
+  const image = new Image();
+  image.src = url;
   await image.decode();
   const canvas = document.createElement('canvas'); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Canvas 2D context unavailable');
   ctx.drawImage(image, 0, 0);
   const id = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  for (let i = 0; i < id.data.length; i += 4) if (id.data[i] === 0xb5 && id.data[i+1] === 0xb5 && id.data[i+2] === 0xb5) id.data[i+3] = 0;
+  // The original hit test uses the RGB color key 0xB5B5B5; those pixels become
+  // fully transparent for click geometry and are not composited.
+  for (let i = 0; i < id.data.length; i += 4) if (id.data[i] === 0xb5 && id.data[i + 1] === 0xb5 && id.data[i + 2] === 0xb5) id.data[i + 3] = 0;
   ctx.putImageData(id, 0, 0);
-  const entry: ExternalTexture = { texture: Texture.from(canvas), hitPixels: id.data, width: canvas.width, height: canvas.height };
-  externalTextures.set(key, entry);
+  return { texture: Texture.from(canvas), hitPixels: id.data, width: canvas.width, height: canvas.height };
+}
+
+export async function acquireExternalTexture(url: string): Promise<ExternalTexture> {
+  const existing = externalTextures.get(url);
+  if (existing) { existing.refs++; return existing.entry; }
+  const entry = await loadExternalTexture(url);
+  externalTextures.set(url, { entry, refs: 1 });
   return entry;
+}
+
+export function releaseExternalTexture(url: string): void {
+  const record = externalTextures.get(url);
+  if (!record) return;
+  record.refs--;
+  if (record.refs > 0) return;
+  externalTextures.delete(url);
+  record.entry.texture.destroy(true);
+}
+
+export function releaseExternalTextures(urls: Iterable<string>): void {
+  for (const url of urls) releaseExternalTexture(url);
+}
+
+/**
+ * Loads every external image a scene needs before its view is created. A failed
+ * image is returned to the caller as a warning instead of failing the whole scene.
+ */
+export async function preloadExternalTextures(urls: Iterable<string>): Promise<string[]> {
+  const failed: string[] = [];
+  for (const url of new Set(urls)) {
+    try {
+      await acquireExternalTexture(url);
+    } catch {
+      failed.push(url);
+    }
+  }
+  return failed;
+}
+
+/** Background textures are reference-counted because two original scenes can share one TIF. */
+const backgrounds = new Map<string, { texture: Texture; refs: number }>();
+
+export async function acquireBackground(url: string, loader: (url: string) => Promise<Texture>): Promise<Texture> {
+  const existing = backgrounds.get(url);
+  if (existing) { existing.refs++; return existing.texture; }
+  const texture = await loader(url);
+  backgrounds.set(url, { texture, refs: 1 });
+  return texture;
+}
+
+export function releaseBackground(url: string): void {
+  const record = backgrounds.get(url);
+  if (!record) return;
+  record.refs--;
+  if (record.refs > 0) return;
+  backgrounds.delete(url);
+  record.texture.destroy(true);
 }

@@ -1,64 +1,61 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { Container } from 'pixi.js';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { buildSceneDefinition, parseAnimationPaths, resolveOriginalResource, type SceneDefinition } from '../src/scene/scene-definition';
-import type { SceneManifestEntry } from '../src/scene/scene-source';
-import { decodeMask } from '../src/scene/mask';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
+import { resolveOriginalResource, type SceneDefinition } from '../src/scene/scene-definition';
 import { computeEntry } from '../src/scene/scene-entry';
 import { SceneLoader, type SceneRuntime, type SceneState } from '../src/scene/scene-loader';
 import { declareSceneObjects, SceneSession } from '../src/scene/scene-session';
 import { hitTest, type HitTarget } from '../src/scene/scene-view';
 import { SccRuntime } from '../src/scc/runtime';
+import { catalogDefinition, catalogEntry, loadTestSceneCatalog, type TestSceneCatalog } from './helpers/scene-catalog';
 
-const root = process.cwd();
-const publicDir = path.join(root, 'public');
-type Manifest = { scenes: SceneManifestEntry[] };
+vi.setConfig({ testTimeout: 60000 });
 
-const catalog = {
-  manifest: undefined as Manifest | undefined,
-  index: undefined as Record<string, string> | undefined,
-  definitions: new Map<number, SceneDefinition>(),
-};
+const publicDir = path.join(process.cwd(), 'public');
+/** Every original Level<n>.scc in the corpus; Level9 does not exist. */
+const ALL_SCENE_IDS = Array.from({ length: 48 }, (_, index) => index + 1).filter((id) => id !== 9);
 
-beforeAll(async () => {
-  const manifest = JSON.parse(await readFile(path.join(publicDir, 'generated/scenes.json'), 'utf8')) as Manifest;
-  const index = JSON.parse(await readFile(path.join(publicDir, 'resources/resource-index.json'), 'utf8')) as Record<string, string>;
-  const mainheroScc = await readFile(path.join(publicDir, 'resources/Mainhero.scc'), 'utf8');
-  for (const entry of manifest.scenes) {
-    const scc = await readFile(path.join(publicDir, entry.scc), 'utf8');
-    const mults = new Map<string, Uint8Array>();
-    for (const [name, originalPath] of new Map([...parseAnimationPaths(scc), ...parseAnimationPaths(mainheroScc)])) {
-      mults.set(name, await readFile(path.join(publicDir, 'resources', resolveOriginalResource(index, originalPath))));
-    }
-    const mask = decodeMask(await readFile(path.join(publicDir, entry.mask)));
-    catalog.definitions.set(entry.id, buildSceneDefinition({ id: entry.id, sccUrl: entry.scc, scc, mainheroScc, background: entry.background, mask, mults }));
-  }
-  catalog.manifest = manifest;
-  catalog.index = index;
-});
+let catalog: TestSceneCatalog;
+beforeAll(async () => { catalog = await loadTestSceneCatalog([1, 39]); });
 
-function definition(id: number): SceneDefinition {
-  const found = catalog.definitions.get(id);
-  if (!found) throw new Error(`Scene ${id} was not prepared`);
-  return found;
-}
+function definition(id: number): SceneDefinition { return catalogDefinition(catalog, id); }
 
 describe('prepared scene catalog', () => {
-  it('publishes every supported scene with existing SCC, background, mask and MULT assets', async () => {
-    expect(catalog.manifest?.scenes.map((scene) => scene.id)).toEqual([1, 39]);
-    for (const entry of catalog.manifest!.scenes) {
+  it('discovers every original scene, not a hand-written Level1/Level39 list', async () => {
+    expect(catalog.manifest.scenes.map((scene) => scene.id)).toEqual(ALL_SCENE_IDS);
+    expect(catalog.manifest.summary.total).toBe(ALL_SCENE_IDS.length);
+    expect(catalog.manifest.summary.loadable).toEqual(ALL_SCENE_IDS);
+    for (const entry of catalog.manifest.scenes) {
+      expect(entry.loadable).toBe(true);
+      expect(entry.missing.required).toEqual([]);
       for (const url of [entry.scc, entry.background, entry.mask]) {
-        const file = path.join(publicDir, url);
+        expect(url).toEqual(expect.any(String));
+        const file = path.join(publicDir, url!);
         await expect(readFile(file)).resolves.toBeInstanceOf(Buffer);
       }
+      for (const url of Object.values(entry.animations)) {
+        await expect(readFile(path.join(publicDir, url))).resolves.toBeInstanceOf(Buffer);
+      }
+      for (const url of Object.values(entry.externalImages)) {
+        await expect(readFile(path.join(publicDir, url))).resolves.toBeInstanceOf(Buffer);
+      }
     }
-    const index = catalog.index!;
+    const index = catalog.index;
     expect(resolveOriginalResource(index, 'XSH\\SCN_37\\start.mult')).toBe('block9/Xsh/Scn_37/start.MULT');
     expect(resolveOriginalResource(index, 'XSH\\SCN_39\\start.mult')).toBe('block9/Xsh/Scn_39/Start.MULT');
     expect(resolveOriginalResource(index, 'XSH\\Base\\walk3.mult')).toBe('block1/Xsh/Base/walk3.MULT');
     expect(resolveOriginalResource(index, 'Masks\\scn_39.tif')).toBe('block0/Masks/Scn_39.TIF');
     expect(() => resolveOriginalResource(index, 'XSH\\SCN_99\\missing.mult')).toThrow(/not in the prepared index/);
+  });
+
+  it('records recursive Inc and every dependency source for Level1', () => {
+    const entry = catalogEntry(catalog, 1);
+    expect(entry.includes).toEqual(['/resources/Cursor.scc', '/resources/Mainhero.scc', '/resources/Ylisa.scc']);
+    expect(entry.sources.background).toBe('block1/Backgrd/Scn_37.TIF');
+    expect(entry.sources.mask).toBe('block0/Masks/Scn_01_1.TIF');
+    expect(entry.externalImages['tzu/scn_37/botl/s0/botl.tif']).toMatch(/Botl\/S0\/botl\.png$/);
+    expect(entry.requiredAnimations).toEqual(expect.arrayContaining(['Startlevel', 'Stop0', 'Stop7']));
   });
 
   it('derives Level1 and Level39 entirely from their original SCC text', () => {
@@ -79,8 +76,12 @@ describe('prepared scene catalog', () => {
       rect: { left: 1350, top: 180, right: 1450, bottom: 280 },
     });
     expect(level1.lights.get('Light0')).toEqual({ name: 'Light0', cursorId: 15, depth: 1000 });
+    // Cursor.scc is recursively included, so its eight interface animations are
+    // part of the scene exactly like Mainhero's Walk/Stop set.
+    expect(level1.objects.get('Interface')).toMatchObject({ depth: 0 });
     expect(level1.mask.width).toBe(1736);
-    expect(level1.animations.size).toBe(39);
+    expect(level1.animations.size).toBe(47);
+    expect(level1.animations.get('Arrow')).toMatchObject({ rate: 20, loop: true });
     expect(level1.animations.get('Takedr1')).toMatchObject({ rate: 12, loop: false, locomotion: false });
     expect(level1.animations.get('Walk6')).toMatchObject({ rate: 32, loop: true, locomotion: true });
 
@@ -98,7 +99,7 @@ describe('prepared scene catalog', () => {
       rect: { left: 1090, top: 270, right: 1150, bottom: 590 },
     });
     expect(level39.mask.width).toBe(1152);
-    expect(level39.animations.size).toBe(30);
+    expect(level39.animations.size).toBe(38);
     expect(level39.animations.get('Fly_c')).toMatchObject({ rate: 16, loop: true });
     expect(level39.frameDepthEvents.filter((event) => event.animation === 'Verx')).toEqual([
       { animation: 'Verx', frame: 5, objectName: 'Col_vaz', depth: 6 },

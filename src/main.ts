@@ -2,7 +2,7 @@ import { Application, Container } from 'pixi.js';
 import type { Point } from './navigation/router';
 import { SceneSession } from './scene/scene-session';
 import type { SceneView } from './scene/scene-view';
-import { loadSceneCatalog } from './scene/scene-source';
+import { loadSceneCatalog, SceneAssetProvider, type SceneManifestEntry } from './scene/scene-source';
 import { InventoryView } from './scene/inventory-view';
 import { logicalScreenPoint } from './scene/active-hit';
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from './config';
@@ -19,9 +19,23 @@ function sprite(view: SceneView | undefined, name: string): string {
   return value ? `${value.sprite}/${value.width}x${value.height}/d${value.depth}@${value.x.toFixed(1)},${value.y.toFixed(1)}` : 'missing';
 }
 
-function describeSession(session: SceneSession, unsupported: readonly number[]): string {
+function objectStateLine(view: SceneView | undefined): string {
+  if (!view) return 'scene.objects=none';
+  const entries = [...view.state.objects.values()]
+    .filter((object) => object.state !== 0 || object.visible !== undefined)
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map((object) => `${object.name}=${object.state}${object.visible !== undefined ? `/${object.visible ? 'v' : 'h'}` : ''}`);
+  return `scene.objects: ${entries.join(' ') || 'none'}`;
+}
+
+function describeSession(session: SceneSession, manifest: { summary: { total: number; loadable: number[]; incomplete: Array<{ id: number }> } }, provider: { loadedCount: number }, unsupported: readonly number[]): string {
   const view = session.view;
-  if (!view) return 'SCENE DEBUG · no active scene';
+  if (!view) {
+    return [
+      `SCENE DEBUG · no active scene · catalog=${manifest.summary.total} loadable=${manifest.summary.loadable.length} incomplete=${manifest.summary.incomplete.length}`,
+      `loading=${session.loading ?? 'none'}${session.loadError ? ` · loadError=${session.loadError.scene}: ${session.loadError.message}` : ''}${unsupported.length ? ` · unsupported=[${unsupported.join(',')}]` : ''}`,
+    ].join('\n');
+  }
   const status = view.status();
   const definition = view.definition;
   const entry = session.entry;
@@ -36,19 +50,54 @@ function describeSession(session: SceneSession, unsupported: readonly number[]):
   const goto5 = level1.objects.get('Goto_5');
   const goto11 = session.loader.state(39).objects.get('Goto_11');
   const initRuns = [...session.initRuns.entries()].map(([scene, count]) => `${scene}:${count}`).join(',');
+  const lstatePlaceholders = [...session.loader.states.values()]
+    .filter((state) => !state.initialized && state.objects.size > 0)
+    .sort((a, b) => a.id - b.id)
+    .map((state) => `${state.id}:${[...state.objects.values()].map((object) => `${object.name}=${object.state}`).join(',')}`)
+    .join(' ');
   return [
-    `SCENE DEBUG · active=${status.scene} · supported=[${session.supportedScenes.join(',')}]${unsupported.length ? ` · unsupported=[${unsupported.join(',')}]` : ''}`,
+    `SCENE DEBUG · active=${status.scene} · catalog=${manifest.summary.total} loadable=${manifest.summary.loadable.length} incomplete=${manifest.summary.incomplete.length}${unsupported.length ? ` · unsupported=[${unsupported.join(',')}]` : ''} · loading=${session.loading ?? 'none'}`,
     `scc=${definition.sccUrl}`,
     `entry=${entryLabel} · pos=(${Math.round(status.position[0])},${Math.round(status.position[1])}) dir=${status.direction} · mask correction=${entry?.snapRadius ?? 0}/${entry?.snapAngleIndex ?? 0}`,
-    `scene=${definition.mask.width}x${definition.mask.height} focus=${definition.focus.join(' ')} portals=${definition.portals.length}`,
-    `hero: depth=${status.depth} scale=${status.scale.toFixed(4)} scroll=${status.scroll} objects=${status.objects} animations=${definition.animations.size}`,
-    `session: zone=${session.loader.game.zone} init=[${initRuns || 'none'}] transitions=[${session.transitionLog.join(' ')}]`,
+    `scene=${definition.mask.width}x${definition.mask.height} focus=${definition.focus.join(' ')} portals=${definition.portals.length} animations=${definition.animations.size} layout=${definition.layoutAnimation ?? 'none'}`,
+    `hero: depth=${status.depth} scale=${status.scale.toFixed(4)} scroll=${status.scroll} objects=${status.objects}`,
+    `session: zone=${session.loader.game.zone} init=[${initRuns || 'none'}] transitions=[${session.transitionLog.join(' ')}] resources.loadedScenes=${provider.loadedCount}`,
+    `lstate.placeholders=[${lstatePlaceholders}]`,
+    ...(session.loadError ? [`loadError=${session.loadError.scene}: ${session.loadError.message}`] : []),
+    objectStateLine(view),
     `active: Goto_5.visible=${goto5?.visible ?? false} Goto_11.visible=${goto11?.visible ?? false}`,
     `inventory=[${status.inventory.join(',')}] selected=${status.selectedItem}`,
     `level1.Botl.state=${botl?.state ?? 0} hidden=${botl?.imageHidden === true} · Pistol.state=${pistol?.state ?? 0} hidden=${pistol?.imageHidden === true}`,
     `level1.Slip.state=${slip?.state ?? 0} · Flag1.state=${flag1?.state ?? 0} · Lec_v.state=${level1.objects.get('Lec_v')?.state ?? 0} · Nar.visible=${nar?.visible ?? false}`,
-    `sprites: Pistol=${sprite(view,'Pistol')} Slip=${sprite(view,'Slip')} Botl=${sprite(view,'Botl')}`,
+    `sprites: Lec_v=${sprite(view,'Lec_v')} Goto_1=${sprite(view,'Goto_1')} Pistol=${sprite(view,'Pistol')} Slip=${sprite(view,'Slip')} Botl=${sprite(view,'Botl')}`,
+    ...(definition.warnings.length ? [`warnings: ${definition.warnings.join('; ')}`] : []),
   ].join('\n');
+}
+
+/** Debug controls are generated from the manifest, never from a fixed scene list. */
+function buildSceneControls(manifest: { scenes: SceneManifestEntry[] }, session: SceneSession): HTMLDetailsElement {
+  const controls = document.createElement('details');
+  controls.className = 'scene-controls';
+  const summary = document.createElement('summary');
+  summary.textContent = `Scenes (${manifest.scenes.length})`;
+  controls.appendChild(summary);
+  const grid = document.createElement('div');
+  grid.className = 'scene-control-buttons';
+  for (const scene of manifest.scenes) {
+    const button = document.createElement('button');
+    button.id = `debug-scene-${scene.id}`;
+    button.dataset.scene = String(scene.id);
+    button.dataset.loadable = String(scene.loadable);
+    button.textContent = `Level${scene.id}`;
+    if (!scene.loadable) {
+      button.title = scene.missing.required.map((missing) => missing.message).join('; ');
+      button.classList.add('incomplete');
+    }
+    button.onclick = () => session.request(scene.id, 0, 'debug');
+    grid.appendChild(button);
+  }
+  controls.appendChild(grid);
+  return controls;
 }
 
 async function main() {
@@ -78,32 +127,21 @@ async function main() {
   if (scenePanel) { scenePanel.className = 'scene-debug'; host.appendChild(scenePanel); }
 
   const unsupported: number[] = [];
+  // The manifest is cheap; SCC/MULT/mask/background/external textures are fetched
+  // only when a scene is entered. Nothing from the scene corpus is uploaded up front.
   const catalog = await loadSceneCatalog();
+  const provider = new SceneAssetProvider(catalog.manifest);
   const inventoryView = new InventoryView(catalog.interface.frame, catalog.interface.icons);
   overlay.addChild(inventoryView.root);
-  const session = new SceneSession(stageRoot, catalog.definitions, catalog.backgrounds, {
-    onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} has no prepared definition`); },
+  const session = new SceneSession(stageRoot, provider, {
+    onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
+    onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
   session.flush();
 
-  if (sceneDebug || depthDebug) {
-    const controls = document.createElement('div');
-    controls.className = 'scene-controls';
-    const buttons = [
-      ['debug-scene-39', 'Level39 · Portal[0]', 39, 0],
-      ['debug-scene-1', 'Level1 · Portal[1]', 1, 1],
-    ] as const;
-    for (const [id, label, scene, portal] of buttons) {
-      const button = document.createElement('button');
-      button.id = id;
-      button.textContent = label;
-      button.onclick = () => session.request(scene, portal, 'debug');
-      controls.appendChild(button);
-    }
-    host.appendChild(controls);
-  }
+  if (sceneDebug || depthDebug) host.appendChild(buildSceneControls(catalog.manifest, session));
 
   let tickNumber = 0;
   let elapsedNow = 0;
@@ -111,7 +149,7 @@ async function main() {
     tickNumber++;
     const dt = Math.max(0, ticker.deltaMS);
     elapsedNow += dt;
-    // A scene switch is applied only at this boundary, never inside a command.
+    // A scene switch (including its lazy resource load) is applied only at this boundary.
     session.flush();
     const view = session.view;
     inventoryView.setItems(session.loader.inventory);
@@ -122,10 +160,13 @@ async function main() {
         ? `ANIMATION TRACE · latest ${Math.min(view.animationLog.length, 120)} updates\n${view.animationReport()}`
         : 'ANIMATION TRACE · no active scene';
     }
-    if (scenePanel) scenePanel.textContent = describeSession(session, unsupported);
+    if (scenePanel) scenePanel.textContent = describeSession(session, catalog.manifest, provider, unsupported);
     const botl = session.loader.state(1).objects.get('Botl')?.state ?? 0;
     const selected = view?.selectedItem ?? 0;
-    hud.textContent = `Агент: Особое задание · сцена ${view?.definition.id ?? '—'} · zone ${session.loader.game.zone} · инвентарь ${view && view.scc.inventory.length ? view.scc.inventory.join(', ') : 'пусто'}${selected ? ` · выбран предмет ${selected}` : ''} · Botl.state=${botl}`;
+    const loading = session.loading;
+    hud.textContent = loading
+      ? `Агент: Особое задание · загрузка сцены ${loading}…`
+      : `Агент: Особое задание · сцена ${view?.definition.id ?? '—'} · zone ${session.loader.game.zone} · инвентарь ${view && view.scc.inventory.length ? view.scc.inventory.join(', ') : 'пусто'}${selected ? ` · выбран предмет ${selected}` : ''} · Botl.state=${botl}`;
   });
 
   app.canvas.addEventListener('pointerdown', (event) => {

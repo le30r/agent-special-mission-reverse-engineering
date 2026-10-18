@@ -5,9 +5,10 @@ import { applyFrameDepthEvents, pixiDepthIndex, skipsImageFrameUpdate } from '..
 import { AnimationPlayer } from '../animation/player';
 import { SccRuntime } from '../scc/runtime';
 import type { SceneDefinition } from './scene-definition';
+import { normalizeExternalPath } from './scene-definition';
 import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneState } from './scene-loader';
 import type { SceneEntry } from './scene-entry';
-import { cachedExternalTexture, resolvedTexture } from './textures';
+import { cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
 import { activeHitTest, worldPointFromScreen } from './active-hit';
 import { applyObjectVisibility, assignImageReference } from './object-visibility';
 import { firstHitTarget } from './object-hit';
@@ -54,6 +55,8 @@ export class SceneView {
   selectedItem = 0;
   /** MULT record names seen without an SCC/runtime object identity (0x405064 skips them). */
   private readonly skippedMultRecords = new Set<string>();
+  /** External image paths without a prepared manifest entry. */
+  private readonly missingExternalRecords = new Set<string>();
   private objectOrder = 0;
   private movement?: Movement;
   private heroIsObjectSpace = false;
@@ -115,20 +118,30 @@ export class SceneView {
 
   private get mask() { return this.definition.mask; }
   private get focus() { return this.definition.focus; }
-  private get layoutFile(): MultFile { return this.definition.animations.get(this.definition.layoutAnimation)!.file; }
+  private get layoutFile(): MultFile | undefined {
+    const name = this.definition.layoutAnimation;
+    return name ? this.definition.animations.get(name)?.file : undefined;
+  }
 
   private objectDepth(name: string): number {
     return this.state.objects.get(name)?.depth ?? 0;
   }
 
-  private external(texturePath: string) {
-    const cached = cachedExternalTexture(texturePath);
-    if (!cached) throw new Error(`External scene image was not preloaded: ${texturePath}`);
+  private external(texturePath: string): ExternalTexture | undefined {
+    const url = this.definition.externalImages.get(normalizeExternalPath(texturePath));
+    const cached = url ? cachedExternalTexture(url) : undefined;
+    if (!cached) {
+      // Optional resource: the original loader would not obtain this image, and
+      // the remaining scene objects still render. Keep it visible in diagnostics.
+      this.missingExternalRecords.add(texturePath);
+      return undefined;
+    }
     return cached;
   }
 
   private createLayoutObjects(): void {
     const file = this.layoutFile;
+    if (!file) return;
     for (const record of this.definition.layout) {
       const stored = findFrameTarget(this.state.objects, record.name);
       if (!stored) {
@@ -143,6 +156,7 @@ export class SceneView {
       let texture: Texture, hitPixels: Uint8ClampedArray | undefined, width: number, height: number;
       if (resolved.externalPath) {
         const ext = this.external(resolved.externalPath);
+        if (!ext) continue;
         texture = ext.texture; hitPixels = ext.hitPixels; width = ext.width; height = ext.height;
       } else if (resolved.bgra) {
         texture = resolvedTexture(file, 1, record, resolved); width = resolved.width; height = resolved.height;
@@ -330,6 +344,12 @@ export class SceneView {
     // preloaded as PNG + hit pixels and must not be mistaken for an empty raster.
     if (resolved.externalPath) {
       const ext = this.external(resolved.externalPath);
+      if (!ext) {
+        object.removed = true; object.sprite.visible = false;
+        object.width = 0; object.height = 0; object.hitPixels = undefined;
+        this.traceVisual(record.name, object.sprite, animationName, frame, source);
+        return;
+      }
       object.removed = false;
       object.sprite.visible = true;
       object.sprite.texture = ext.texture;
@@ -554,6 +574,7 @@ export class SceneView {
       relation: 'behind hero' | 'in front of hero'; origin: string; visible: boolean; x: number; y: number;
     }>;
     skippedMultOnly: string[];
+    missingExternalImages: string[];
   } {
     const heroIndex = this.world.getChildIndex(this.hero);
     const objects = [...this.objects.values()]
@@ -583,6 +604,7 @@ export class SceneView {
       },
       objects,
       skippedMultOnly: [...this.skippedMultRecords].sort(),
+      missingExternalImages: [...this.missingExternalRecords].sort(),
     };
   }
 
@@ -597,6 +619,12 @@ export class SceneView {
       ...snapshot.objects.map((item) => `${String(item.drawIndex).padStart(3)} ${item.name.padEnd(14)} depth=${String(item.depth).padStart(7)} abs=${String(item.absDepth).padStart(7)} z=${String(item.zIndex).padStart(8)} ${item.relation} · ${item.origin}`),
       ...(snapshot.skippedMultOnly.length
         ? [`Skipped MULT-only records (0x405064 -> 0x40a8dc=NULL): ${snapshot.skippedMultOnly.join(', ')}`]
+        : []),
+      ...(snapshot.missingExternalImages.length
+        ? [`Missing external images (optional): ${snapshot.missingExternalImages.join(', ')}`]
+        : []),
+      ...(this.definition.warnings.length
+        ? [`Scene load warnings: ${this.definition.warnings.join('; ')}`]
         : []),
       'Equal abs(depth): comparator returns 0; stable insertion order used (native tie order UNKNOWN).',
     ].join('\n');

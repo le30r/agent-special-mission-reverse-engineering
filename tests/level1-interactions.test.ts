@@ -13,7 +13,7 @@ import { inventorySlotOrdinal, itemAtInventoryPosition } from '../src/scene/inve
 import { catalogDefinition, loadTestSceneCatalog, type TestSceneCatalog } from './helpers/scene-catalog';
 
 let catalog: TestSceneCatalog;
-beforeAll(async () => { catalog = await loadTestSceneCatalog(); });
+beforeAll(async () => { catalog = await loadTestSceneCatalog([1]); });
 
 function definition(): SceneDefinition { return catalogDefinition(catalog, 1); }
 
