@@ -145,9 +145,10 @@ async function main() {
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
   if (sceneDebug) {
-    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown };
+    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown };
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
     debugWindow.__sccDebug = { session, view: () => session.view };
+    debugWindow.__inventoryDebug = { view: () => ({ open: inventoryView.open, pendingSelection: inventoryView.pendingSelection }) };
   }
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
@@ -188,11 +189,12 @@ async function main() {
     if (!view) return;
     if (audioBackend) void view.unlockAudio().catch((error) => console.warn('Audio unlock failed', error));
     const [x, y] = screenPosition(app, event);
-    // The inventory is a normal overlay: it consumes its clicks, and a selected
-    // slot becomes SCC `scene+5` for the next scene click.
-    if (inventoryView.pointerDown(x, y)) {
-      const selected = inventoryView.consumeSelection();
-      if (selected > 0) view.selectItem(selected);
+    // The inventory is a normal overlay. Its pending choice becomes scene+5
+    // only when the panel closes; the tab cancels an existing scene choice.
+    const inventoryAction = inventoryView.pointerDown(x, y, session.loader.inventory, view.selectedItem);
+    if (inventoryAction.handled) {
+      if (inventoryAction.cancelSceneSelection) view.selectItem(0);
+      if (inventoryAction.selectedItem) view.selectItem(inventoryAction.selectedItem);
       return;
     }
     view.pointerDown(x, y);
