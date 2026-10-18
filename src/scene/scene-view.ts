@@ -3,7 +3,7 @@ import type { MultFile, MultObject } from '../mult/decoder';
 import { buildRoute, correctPosition, depthAt, scaleAt, updateScroll, type Point, type Route } from '../navigation/router';
 import { applyFrameDepthEvents, pixiDepthIndex, skipsImageFrameUpdate } from '../navigation/depth-sort';
 import { AnimationPlayer } from '../animation/player';
-import { SccRuntime } from '../scc/runtime';
+import { selectFaultVoiceIndex, SccRuntime, type FaultList } from '../scc/runtime';
 import type { SceneDefinition } from './scene-definition';
 import { normalizeExternalPath } from './scene-definition';
 import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneState } from './scene-loader';
@@ -68,6 +68,13 @@ export class SceneView {
   private readonly audio: SccAudioRuntime;
   private readonly latchedSounds = new Set<number>();
   private readonly soundEventsById = new Map<number, FrameSoundEvent>();
+  private readonly audioEvents: FrameSoundEvent[];
+  /** A fresh FaultList set belongs to this SceneView visit, never the cached definition. */
+  private readonly faultLists: FaultList[];
+  private readonly faultVoiceIds = new Map<FaultList, number[]>();
+  private speakEvent?: FrameSoundEvent;
+  private nextRuntimeEventId = 0;
+  private rand15: () => number = () => Math.floor(Math.random() * 0x8000);
   private readonly activeBarriers = new Map<string, number>();
   private activeMask: SceneDefinition['mask'];
   private inputBlocked = false;
@@ -100,7 +107,22 @@ export class SceneView {
       locomotion: animation.locomotion,
     })));
     this.audio = new SccAudioRuntime(audioBackend, definition.audioResources, definition.id, !audioBackend, definition.audioDurations, definition.audioStorageModes);
-    for (const event of definition.audioEvents) this.soundEventsById.set(event.id, event);
+    this.audioEvents = [...definition.audioEvents];
+    this.faultLists = definition.faultLists.map((list) => ({ ...list, voices: [...list.voices] }));
+    this.nextRuntimeEventId = this.audioEvents.reduce((maximum, event) => Math.max(maximum, event.id), -1) + 1;
+    for (const event of this.audioEvents) this.soundEventsById.set(event.id, event);
+    if (this.player.states.has('Speak')) {
+      this.speakEvent = { id: this.nextRuntimeEventId++, animation: 'Speak', start: 1, end: 3, objects: ['Mainhero'], value: '', repeat: false };
+      this.audioEvents.push(this.speakEvent);
+      this.soundEventsById.set(this.speakEvent.id, this.speakEvent);
+      for (const list of this.faultLists) {
+        this.faultVoiceIds.set(list, list.voices.map((value) => {
+          const voice = { id: this.nextRuntimeEventId++, animation: 'Speak', start: 1, end: 3, objects: ['Mainhero'], value, repeat: false };
+          this.soundEventsById.set(voice.id, voice);
+          return this.audio.ownVoice(voice);
+        }));
+      }
+    }
     this.scc = new SccRuntime(definition.scc, {
       pathActive: () => Boolean(this.movement && this.movement.remaining > 0),
       animationActive: (name) => this.player.isActive(name),
@@ -444,7 +466,7 @@ export class SceneView {
 
   /** SCC `Stop name` (opcode 0x15): deactivate and reset the animation to frame 1. */
   private stopAnimation(name: string): void {
-    const latched = this.definition.audioEvents.find((event) => event.animation === name && this.latchedSounds.has(event.id));
+    const latched = this.audioEvents.find((event) => event.animation === name && this.latchedSounds.has(event.id));
     if (latched) {
       this.audio.stop(latched.id);
       this.latchedSounds.delete(latched.id);
@@ -510,7 +532,7 @@ export class SceneView {
     for (const [name, state] of this.player.states) {
       if (onlyName && onlyName !== name) continue;
       if (!state.active && !naturalEnd) continue;
-      const events = this.definition.audioEvents.filter((event) => event.animation === name);
+      const events = this.audioEvents.filter((event) => event.animation === name);
       let index = 0;
       while (index < events.length) {
         const event = events[index++];
@@ -610,7 +632,10 @@ export class SceneView {
       if (!declaration.rect) continue;
       const target = { visible: this.activeVisible(name), rect: declaration.rect };
       if (!activeHitTest(target, screenX, screenY, this.scrollX, 0)) continue;
-      if (this.scc.click(name, selectedItem) && selectedItem !== 0) this.selectedItem = 0;
+      const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
+      const handled = this.scc.click(name, selectedItem);
+      if (handled && selectedItem !== 0) this.selectedItem = 0;
+      if (!handled && selectedItem === 0 && !this.inputBlocked) this.tryFault(name, worldX, worldY);
       return;
     }
     const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
@@ -631,6 +656,7 @@ export class SceneView {
       }
       // A handled object click never falls through to click-to-walk (0x40a31c).
       if (handled) return;
+      if (selectedItem === 0 && !this.inputBlocked && this.tryFault(target.name, worldX, worldY)) return;
     }
     // The original clears active Programs even when no object was hit (0x40a1bc).
     this.scc.cancelActive();
@@ -645,6 +671,21 @@ export class SceneView {
       this.stopLocomotion('navigation-update');
       this.startAnimation(`Stop${this.heroDirection}`, 'navigation-update');
     }
+  }
+
+  /** Deterministic injection point for original rand15 selection tests. */
+  setFaultRand15(source: () => number): void { this.rand15 = source; }
+
+  private tryFault(objectName: string, x: number, y: number): boolean {
+    if (this.scc.busy || this.inputBlocked || this.selectedItem !== 0 || !this.speakEvent) return false;
+    const list = this.faultLists.find((candidate) => candidate.objectName === objectName);
+    if (!list) return false;
+    const index = selectFaultVoiceIndex(list.voices.length, this.rand15());
+    const voiceId = index === undefined ? undefined : this.faultVoiceIds.get(list)?.[index];
+    if (voiceId === undefined) return false;
+    this.audio.bindBorrowedVoice(this.speakEvent.id, voiceId);
+    this.scc.dispatchFault(x, y);
+    return true;
   }
 
   /** Selects an inventory item for the next scene click (`scene+5`). */
@@ -762,6 +803,8 @@ export class SceneView {
   dispose(): void {
     this.scc.cancelActive();
     this.audio.dispose();
+    this.faultVoiceIds.clear();
+    this.faultLists.length = 0;
     for (const name of this.player.states.keys()) this.player.stop(name);
     this.movement = undefined;
     this.state.savedPosition = [this.heroPosition[0], this.heroPosition[1]];

@@ -93,6 +93,8 @@ class RuntimeHandle implements AudioEventHandle {
 /** Scene owns stable Voices; each Voice owns at most one generation of playback. */
 export class SccAudioRuntime {
   private readonly voices = new Map<number, Voice>();
+  /** Event slots are borrowed references; their owning Voice remains in `voices`. */
+  private readonly borrowedVoices = new Map<number, number>();
   private readonly shared = new Map<string, Run>();
   private readonly scope?: AudioResourceScope;
   private generation = 0;
@@ -126,9 +128,34 @@ export class SccAudioRuntime {
   private sharedPcm(voice: Voice): boolean { return !this.silent && this.storageModes[voice.key] === 'sharedPcm'; }
   private currentRun(voice: Voice): Run | undefined { return this.sharedPcm(voice) ? this.shared.get(voice.key) : voice.run; }
 
+  private voiceFor(eventId: number): Voice | undefined {
+    return this.voices.get(this.borrowedVoices.get(eventId) ?? eventId);
+  }
+
+  /** Allocate a scene-owned Voice without starting it (used by visit-owned FaultLists). */
+  ownVoice(event: FrameSoundEvent): number {
+    if (this.disposed) return event.id;
+    let voice = this.voices.get(event.id);
+    if (!voice) {
+      const key = normalizeSoundPath(event.value);
+      voice = { instanceId: this.nextVoiceId++, event, key, url: this.resources[key], duration: this.durations[key] ?? -1, playGeneration: 0, replacements: 0 };
+      this.voices.set(event.id, voice);
+      this.record('voice.created', voice, `owned=${event.value}`);
+    }
+    return event.id;
+  }
+
+  /** Make an animation Event temporarily reference a Fault-owned Voice. */
+  bindBorrowedVoice(eventId: number, voiceId: number): void {
+    if (!this.voices.has(voiceId)) return;
+    const previous = this.voiceFor(eventId);
+    if (previous && this.currentRun(previous) && !this.currentRun(previous)!.handle.terminal) this.cancel(this.currentRun(previous)!, 'replaced');
+    this.borrowedVoices.set(eventId, voiceId);
+  }
+
   /** Only native-no-device uses elapsed encoded duration. Browser readiness is terminal playback state. */
   isReady(eventId: number, logicalTick: number): boolean {
-    const voice = this.voices.get(eventId);
+    const voice = this.voiceFor(eventId);
     const run = voice && this.currentRun(voice);
     if (!voice || !run || run.handle.terminal) return true;
     if (!this.silent) return false;
@@ -145,13 +172,10 @@ export class SccAudioRuntime {
       handle.finish('disposed');
       return handle;
     }
-    let voice = this.voices.get(event.id);
-    if (!voice) {
-      const key = normalizeSoundPath(event.value);
-      voice = { instanceId: this.nextVoiceId++, event, key, url: this.resources[key], duration: this.durations[key] ?? -1, playGeneration: 0, replacements: 0 };
-      this.voices.set(event.id, voice);
-      this.record('voice.created', voice, `animation=${event.animation} range=${event.start}..${event.end}`);
-    }
+    const ownerId = this.borrowedVoices.get(event.id) ?? event.id;
+    let voice = this.voices.get(ownerId);
+    if (!voice) { this.ownVoice(event); voice = this.voices.get(ownerId); }
+    if (!voice) throw new Error(`Could not allocate Voice ${event.id}`);
     const previous = this.currentRun(voice);
     if (!this.silent && event.repeat && previous && !previous.handle.terminal) return previous.handle;
     if (previous && !previous.handle.terminal) {
@@ -240,15 +264,17 @@ export class SccAudioRuntime {
   }
 
   stop(eventId: number): void {
-    const voice = this.voices.get(eventId);
+    const voice = this.voiceFor(eventId);
     const run = voice && this.currentRun(voice);
     if (run) this.cancel(run, 'stopped');
     if (voice) this.record('voice.stopped', voice, 'explicit Stop event');
   }
   snapshot() {
-    return [...this.voices.entries()].map(([id, voice]) => {
-      const run = this.currentRun(voice)!;
-      return { id, voiceId: voice.instanceId, playGeneration: voice.playGeneration, state: run.handle.state, finished: run.handle.terminal, duration: voice.duration, lastPlay: run.lastPlay, repeat: voice.event.repeat, attempting: run.attempting, attempts: run.attempts, replacements: voice.replacements, error: run.error };
+    return [...this.voices.entries()].flatMap(([id, voice]) => {
+      const run = this.currentRun(voice);
+      // Owned but never-played Fault Voices are resources, not playback snapshots.
+      if (!run) return [];
+      return { id, voiceId: voice.instanceId, playGeneration: voice.playGeneration, state: run?.handle.state ?? 'pending', finished: run?.handle.terminal ?? false, duration: voice.duration, lastPlay: run?.lastPlay ?? 0, repeat: voice.event.repeat, attempting: run?.attempting ?? false, attempts: run?.attempts ?? 0, replacements: voice.replacements, error: run?.error };
     });
   }
   stopFirst(predicate: (eventId: number) => boolean): number | undefined {
@@ -263,7 +289,7 @@ export class SccAudioRuntime {
       this.record('voice.disposed', voice, 'scene disposal');
     }
     this.scope?.dispose();
-    this.voices.clear(); this.shared.clear();
+    this.borrowedVoices.clear(); this.voices.clear(); this.shared.clear();
   }
   private record(event: string, voice?: Voice, detail?: string): void {
     this.diagnosticEvents.push({ time: globalThis.performance?.now?.() ?? Date.now(), event, voiceId: voice?.instanceId, url: voice?.url, contextState: this.contextState, detail: voice ? `eventId=${voice.event.id}${detail ? ` ${detail}` : ''}` : detail });
