@@ -34,6 +34,7 @@ export type SceneDependencyRecord = {
   includes: SourcePath[];
   background?: SourcePath;
   mask?: SourcePath;
+  masks: SourcePath[];
   animations: SceneAnimationDependency[];
   externalImages: SourcePath[];
   layoutAnimation?: string;
@@ -307,6 +308,8 @@ export async function discoverSceneDependencies(options: DiscoveryOptions): Prom
 
     const background = resolve(header.background, 'background');
     const mask = resolve(header.mask, 'mask');
+    const maskPaths = new Set<string>([...(header.mask ? [header.mask] : []), ...[...expanded.source.matchAll(/^\s*Setmsk\s+(\S+)/gim)].map((match) => match[1])]);
+    const masks = [...maskPaths].map((maskPath) => resolve(maskPath, 'mask')).filter((resource): resource is SourcePath => Boolean(resource));
 
     const parsedAnimations = parseAnimationDeclarations(expanded.source);
     const layoutAnimation = findLayoutAnimation(parsedAnimations);
@@ -387,6 +390,7 @@ export async function discoverSceneDependencies(options: DiscoveryOptions): Prom
       includes: expanded.includes,
       background,
       mask,
+      masks,
       animations,
       externalImages: [...externalImages.values()],
       layoutAnimation,

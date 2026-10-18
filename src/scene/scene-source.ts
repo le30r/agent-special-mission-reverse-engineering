@@ -32,6 +32,8 @@ export type SceneManifestEntry = {
   includes: string[];
   background: string | null;
   mask: string | null;
+  /** Normalized original Setmsk path -> prepared raw TIFF URL. */
+  masks?: Record<string, string>;
   /** Animation name -> prepared MULT URL. Missing optional animations are omitted. */
   animations: Record<string, string>;
   /** Normalized original external image path -> prepared PNG URL. */
@@ -161,11 +163,14 @@ export async function loadSceneDefinition(
   if (!entry.loadable || requiredReasons.length) throw new SceneLoadError(entry.id, requiredReasons);
   if (!entry.mask) throw new SceneLoadError(entry.id, ['mask is not prepared']);
   const required = new Set(entry.requiredAnimations);
-  const [scc, includeSources, maskBytes] = await Promise.all([
+  const maskEntries = Object.entries(entry.masks ?? {});
+  const [scc, includeSources, maskBytes, alternateMaskBytes] = await Promise.all([
     reader.text(entry.scc),
     Promise.all(entry.includes.map((url) => reader.text(url))),
     reader.bytes(entry.mask),
+    Promise.all(maskEntries.map(([, url]) => reader.bytes(url))),
   ]);
+  const masks = new Map(maskEntries.map(([path], index) => [path, decodeMask(alternateMaskBytes[index])]));
   const mults = new Map<string, ReturnType<typeof decodeMult>>();
   const warnings: string[] = [];
   for (const [name, url] of Object.entries(entry.animations)) {
@@ -187,6 +192,7 @@ export async function loadSceneDefinition(
     includeSources,
     background: entry.background ?? '',
     mask: decodeMask(maskBytes),
+    masks,
     mults,
     externalImages: entry.externalImages,
     layoutAnimation: entry.layoutAnimation ?? undefined,

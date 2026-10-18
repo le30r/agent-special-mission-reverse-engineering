@@ -8,7 +8,8 @@ import {
   scanMultExternalPaths,
 } from '../src/scene/scene-discovery';
 import { collectAnimationExternalImages, loadSceneDefinition } from '../src/scene/scene-source';
-import { catalogEntry, fileSceneReader, loadTestSceneCatalog } from './helpers/scene-catalog';
+import { buildRoute, correctPosition, sample } from '../src/navigation/router';
+import { catalogDefinition, catalogEntry, fileSceneReader, loadTestSceneCatalog } from './helpers/scene-catalog';
 
 vi.setConfig({ testTimeout: 60000 });
 
@@ -61,6 +62,28 @@ describe('automatic scene discovery', () => {
     expect(level1.externalImages.map((image) => normalizeOriginalPath(image.originalPath))).toContain('tzu/scn_37/botl/s0/botl.tif');
     expect(level1.missing.filter((missing) => missing.required)).toEqual([]);
   });
+
+  it('prepares Level16 Setmsk TIFFs and routes against the selected raw mask', async () => {
+    const discovery = await discoverSceneDependencies({ sourceRoot, scriptsRoot });
+    const level16 = discovery.scenes.find((scene) => scene.id === 16)!;
+    expect(level16.masks.map((mask) => normalizeOriginalPath(mask.originalPath))).toEqual([
+      'masks/scn_16.tif', 'masks/scn_16_m.tif',
+    ]);
+    const catalog = await loadTestSceneCatalog([16]);
+    const definition = catalogDefinition(catalog, 16);
+    const regular = definition.masks.get('masks/scn_16.tif')!;
+    const alternate = definition.masks.get('masks/scn_16_m.tif')!;
+    expect(sample(regular, 581, 554)).toBe(72);
+    expect(sample(alternate, 581, 554)).toBe(0);
+    expect(correctPosition(regular, [581, 554])?.point).toEqual([581, 554]);
+    expect(correctPosition(alternate, [581, 554])?.point).toEqual([580, 555]);
+    const normalRoute = buildRoute(regular, [580, 565], [581, 554]);
+    const alternateRoute = buildRoute(alternate, [580, 565], [581, 554]);
+    expect(normalRoute.status).toBe('route');
+    expect(alternateRoute.status).toBe('route');
+    expect(normalRoute.target).not.toEqual(alternateRoute.target);
+    expect(normalRoute.path).not.toEqual(alternateRoute.path);
+  }, 30000);
 
   it('marks scenes without Startlevel as valid empty-layout scenes', async () => {
     const discovery = await discoverSceneDependencies({ sourceRoot, scriptsRoot });
@@ -146,7 +169,7 @@ describe('automatic scene discovery', () => {
     const definition = await loadSceneDefinition(entry, reader);
     expect(definition.id).toBe(1);
     expect(requestedText.sort()).toEqual([entry.scc, ...entry.includes].sort());
-    expect(new Set(requestedBytes)).toEqual(new Set([entry.mask!, ...Object.values(entry.animations)]));
+    expect(new Set(requestedBytes)).toEqual(new Set([entry.mask!, ...Object.values(entry.masks ?? {}), ...Object.values(entry.animations)]));
     expect(requestedText).not.toContain('/resources/Level39.scc');
     expect(requestedBytes).not.toContain('/resources/Level39.scc');
   }, 30000);
