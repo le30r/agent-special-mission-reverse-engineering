@@ -24,13 +24,17 @@ class FakeSource implements AudioBufferSourcePort {
   disconnect() {}
   startError?: Error;
   started = false;
+  stopped = false;
   start() { this.started = true; if (this.startError) throw this.startError; }
-  stop() { this.onended?.(); }
+  stop() { this.stopped = true; this.onended?.(); }
+  end() { this.onended?.(); }
 }
 class FakeContext implements AudioContextPort {
   state = 'running'; destination = {};
-  source = new FakeSource();
-  createBufferSource() { return this.source; }
+  sources: FakeSource[] = [];
+  nextStartError?: Error;
+  get source() { return this.sources[this.sources.length - 1] ?? new FakeSource(); }
+  createBufferSource() { const source = new FakeSource(); source.startError = this.nextStartError; this.sources.push(source); return source; }
   async decodeAudioData(): Promise<AudioBufferPort> { return { duration: 0.1, length: 4410, numberOfChannels: 1 }; }
   async resume() {}
   async close() {}
@@ -166,8 +170,137 @@ describe('SCC WAV runtime regression L1–L9', () => {
     audio.play(makeEvent(8), 1000);
     expect(audio.isReady(8, 1030)).toBe(false);
     expect(audio.isReady(8, 1031)).toBe(true);
-    expect(audio.snapshot().find((voice) => voice.id === 8)).toMatchObject({ state: 'ended', finished: true });
+    expect(audio.snapshot().find((voice) => voice.id === 8)).toMatchObject({ state: 'pending', finished: true });
     audio.dispose();
+  });
+
+  it('plays a cold WAV whose fetch/decode finishes after the strict logical duration deadline', async () => {
+    const context = new FakeContext();
+    let release!: (value: AudioBufferPort) => void;
+    context.decodeAudioData = vi.fn(() => new Promise<AudioBufferPort>((resolve) => { release = resolve; }));
+    const backend = new BrowserAudioBackend({ context, fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }) });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/cold.wav' }, 1, false, { 'sound/scn_01/konst/004.wav': 30 });
+    const handle = audio.play(makeEvent(20), 1000);
+    await vi.waitFor(() => expect(context.decodeAudioData).toHaveBeenCalledOnce());
+    expect(audio.isReady(20, 1030)).toBe(false);
+    expect(audio.isReady(20, 1031)).toBe(true);
+    expect(handle.state).toBe('pending');
+    release({ duration: 0.04, length: 1764, numberOfChannels: 1 });
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    expect(context.source.started).toBe(true);
+    expect(context.source.stopped).toBe(false);
+    expect(handle.state).toBe('playing');
+    expect(audio.isReady(20, 1031)).toBe(true);
+    audio.dispose(); await backend.dispose();
+  });
+
+  it('preserves an in-flight occurrence when the same SCC event id fires again', async () => {
+    const context = new FakeContext();
+    const decodes: Array<(value: AudioBufferPort) => void> = [];
+    context.decodeAudioData = vi.fn(() => new Promise<AudioBufferPort>((resolve) => decodes.push(resolve)));
+    const backend = new BrowserAudioBackend({ context, fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }) });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/delayed-repeat.wav' }, 1, false, { 'sound/scn_01/konst/004.wav': 5 });
+    const first = audio.play(makeEvent(28), 10);
+    await vi.waitFor(() => expect(decodes).toHaveLength(1));
+    expect(audio.isReady(28, 11)).toBe(false);
+    const second = audio.play(makeEvent(28), 11);
+    await vi.waitFor(() => expect(decodes).toHaveLength(2));
+    decodes[0]({ duration: 0.1, length: 4410, numberOfChannels: 1 });
+    decodes[1]({ duration: 0.1, length: 4410, numberOfChannels: 1 });
+    await vi.waitFor(() => expect(context.sources).toHaveLength(2));
+    expect(context.sources.map((source) => source.started)).toEqual([true, true]);
+    expect(context.sources.map((source) => source.stopped)).toEqual([false, false]);
+    expect(first.state).toBe('playing');
+    expect(second.state).toBe('playing');
+    audio.dispose(); await backend.dispose();
+  });
+
+  it('cancels a Voice stopped during decode without allowing a late callback to revive it', async () => {
+    const context = new FakeContext();
+    let release!: (value: AudioBufferPort) => void;
+    context.decodeAudioData = vi.fn(() => new Promise<AudioBufferPort>((resolve) => { release = resolve; }));
+    const backend = new BrowserAudioBackend({ context, fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }) });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/stopped-during-decode.wav' }, 1, false);
+    const handle = audio.play(makeEvent(29), 1);
+    await vi.waitFor(() => expect(context.decodeAudioData).toHaveBeenCalledOnce());
+    audio.stop(29);
+    release({ duration: 1, length: 44100, numberOfChannels: 1 });
+    await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+    expect(handle.state).toBe('stopped');
+    expect(context.sources).toHaveLength(0);
+    expect(audio.isReady(29, 2)).toBe(true);
+    audio.dispose(); await backend.dispose();
+  });
+
+  it('plays sequential and repeated WAV events from cache without duplicate starts', async () => {
+    const context = new FakeContext();
+    const fetcher = vi.fn(async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }));
+    const backend = new BrowserAudioBackend({ context, fetcher });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/same.wav' }, 1, false);
+    const repeated = makeEvent(21, true);
+    audio.play(repeated, 1);
+    await vi.waitFor(() => expect(context.sources).toHaveLength(1));
+    const same = audio.play(repeated, 2);
+    expect(same).toBe(audio.play(repeated, 3));
+    expect(context.sources).toHaveLength(1);
+    audio.play(makeEvent(22), 4);
+    await vi.waitFor(() => expect(context.sources).toHaveLength(2));
+    expect(fetcher).toHaveBeenCalledOnce();
+    expect(context.sources.every((source) => source.started)).toBe(true);
+    audio.dispose(); await backend.dispose();
+  });
+
+  it('starts simultaneous independent Voice instances and preserves their independent lifetimes', async () => {
+    const context = new FakeContext();
+    const backend = new BrowserAudioBackend({ context, fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }) });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/same.wav' }, 1, false);
+    audio.play(makeEvent(23), 1);
+    audio.play(makeEvent(24), 1);
+    await vi.waitFor(() => expect(context.sources).toHaveLength(2));
+    expect(backend.activePlaybackCount).toBe(2);
+    context.sources[0].end();
+    expect(backend.activePlaybackCount).toBe(1);
+    expect(context.sources[1].stopped).toBe(false);
+    audio.dispose(); await backend.dispose();
+  });
+
+  it('retries autoplay-locked Voice only after unlock and cancels old-scene loads safely', async () => {
+    const context = new FakeContext();
+    context.nextStartError = new DOMException('gesture required', 'NotAllowedError');
+    const backend = new BrowserAudioBackend({ context, fetcher: async () => ({ ok: true, status: 200, arrayBuffer: async () => wav() }) });
+    const audio = new SccAudioRuntime(backend, { 'sound/scn_01/konst/004.wav': '/locked.wav' }, 1, false);
+    const handle = audio.play(makeEvent(25), 1);
+    await vi.waitFor(() => expect(audio.snapshot().find((voice) => voice.id === 25)?.error).toContain('NotAllowedError'));
+    expect(audio.snapshot().find((voice) => voice.id === 25)?.error).toContain('NotAllowedError');
+    const laterHandle = audio.play(makeEvent(25), 2);
+    await vi.waitFor(() => expect(context.sources.filter((source) => source.startError).length).toBe(2));
+    context.nextStartError = undefined;
+    await audio.unlock();
+    await vi.waitFor(() => expect(handle.state).toBe('playing'));
+    await vi.waitFor(() => expect(laterHandle.state).toBe('playing'));
+    expect(context.sources.filter((source) => source.started)).toHaveLength(4); // two blocked attempts, then one successful source per Voice.
+    audio.dispose(); await backend.dispose();
+
+    let resolveFetch!: (value: { ok: boolean; status: number; arrayBuffer(): Promise<ArrayBuffer> }) => void;
+    const sceneBackend = new BrowserAudioBackend({ context: new FakeContext(), fetcher: () => new Promise((resolve) => { resolveFetch = resolve; }) });
+    const oldScene = new SccAudioRuntime(sceneBackend, { 'sound/scn_01/konst/004.wav': '/old-scene.wav' }, 1, false);
+    const oldHandle = oldScene.play(makeEvent(26), 1);
+    await Promise.resolve(); oldScene.dispose();
+    resolveFetch({ ok: true, status: 200, arrayBuffer: async () => wav() });
+    await Promise.resolve(); await Promise.resolve();
+    expect(oldHandle.state).toBe('disposed');
+    expect(sceneBackend.activePlaybackCount).toBe(0);
+    await sceneBackend.dispose();
+  });
+
+  it('keeps strict synchronous Fram barrier release independent from late playback completion', () => {
+    const event = makeEvent(27);
+    let frame = 1, latched = false;
+    const started = stepSyncRange(event, frame, latched, false);
+    frame = started.frame; latched = started.latched;
+    expect(started.started).toBe(true);
+    expect(stepSyncRange(event, 2, latched, false)).toMatchObject({ repeated: true, frame: 1, latched: true });
+    expect(stepSyncRange(event, 2, latched, true)).toMatchObject({ completed: true, frame: 2, latched: false });
   });
 
   it('normalizes case and separator style but never resolves by basename only', () => {

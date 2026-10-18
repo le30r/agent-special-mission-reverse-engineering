@@ -57,7 +57,7 @@ export function parseFrameSoundEvents(...sources: string[]): FrameSoundEvent[] {
 }
 
 export type AudioEventHandle = { readonly state: 'pending' | 'playing' | 'ended' | 'stopped' | 'failed' | 'disposed'; stop(): void };
-type Voice = { handle: RuntimeHandle; duration: number; lastPlay: number; started: boolean; finished: boolean; awaitingUnlock: boolean; repeat: boolean; abort?: AbortController; event: FrameSoundEvent; url?: string; attempting: boolean; attempts: number; replacements: number; lastError?: string };
+type Voice = { instanceId: number; handle: RuntimeHandle; duration: number; lastPlay: number; started: boolean; finished: boolean; awaitingUnlock: boolean; repeat: boolean; abort?: AbortController; event: FrameSoundEvent; url?: string; attempting: boolean; attempts: number; replacements: number; lastError?: string };
 
 /** Exact no-device timing predicate from 0x402f18/0x402fc8; stop deliberately leaves this clock untouched. */
 export class SilentVoiceClock {
@@ -78,11 +78,14 @@ class RuntimeHandle implements AudioEventHandle {
 /** WAV Voice ownership and deterministic no-device ready clock, scoped to one scene visit. */
 export class SccAudioRuntime {
   private readonly voices = new Map<number, Voice>();
+  private readonly allVoices = new Set<Voice>();
   private readonly handles = new Set<RuntimeHandle>();
   private readonly scope?: AudioResourceScope;
   private readonly backend?: BrowserAudioBackend;
   private generation = 0;
   private disposed = false;
+  private nextVoiceId = 1;
+  private readonly diagnosticEvents: Array<{ time: number; event: string; voiceId?: number; url?: string; detail?: string }> = [];
   constructor(
     backend: BrowserAudioBackend | undefined,
     private readonly resources: Readonly<Record<string, string>>,
@@ -112,14 +115,16 @@ export class SccAudioRuntime {
     if (!voice || !voice.started) return true;
     if (voice.handle.state === 'ended' || voice.handle.state === 'stopped' || voice.handle.state === 'failed' || voice.handle.state === 'disposed') return true;
     if (voice.awaitingUnlock) return false;
+    if (voice.finished) return true;
     // The browser playback Promise is only a loading/start notification, not
     // the game's Voice.finished signal. A stalled fetch/decode (or a late
     // callback) must not pin a one-frame Fram barrier forever. Native Voice
     // completion is polled against its duration, with the strict > predicate.
     if (voice.duration >= 0 && ((logicalTick - voice.lastPlay) | 0) > voice.duration) {
       voice.finished = true;
-      if (voice.handle.state === 'pending') voice.handle.state = 'ended';
-      voice.handle.playback?.stop();
+      this.record('voice.logical-finished', voice, `elapsed=${(logicalTick - voice.lastPlay) | 0} duration=${voice.duration}`);
+      // This is only the SCC barrier clock. Fetch/decode can still be in flight,
+      // and a started source owns its own actual lifetime through onended.
       return true;
     }
     return voice.finished;
@@ -128,16 +133,22 @@ export class SccAudioRuntime {
   play(event: FrameSoundEvent, logicalTick: number): AudioEventHandle {
     const old = this.voices.get(event.id);
     if (old && (old.handle.state === 'pending' || old.handle.state === 'playing') && event.repeat) return old.handle;
-    old?.handle.stop();
+    // Event ids identify SCC declarations, not individual animation passes.
+    // Each non-repeat invocation is an earned occurrence and must have its own
+    // playback lifetime, even while a previous occurrence is loading/playing.
+    if (old) this.record('voice.superseded', old, `new occurrence at tick=${logicalTick}; playback retained`);
     const handle = new RuntimeHandle();
     this.handles.add(handle);
     const key = normalizeSoundPath(event.value);
     const knownDuration = this.durations[key];
-    const voice: Voice = { handle, duration: knownDuration ?? -1, lastPlay: logicalTick, started: true, finished: false, awaitingUnlock: false, repeat: event.repeat, abort: new AbortController(), event, attempting: false, attempts: 0, replacements: (old?.replacements ?? 0) + (old ? 1 : 0) };
+    const voice: Voice = { instanceId: this.nextVoiceId++, handle, duration: knownDuration ?? -1, lastPlay: logicalTick, started: true, finished: false, awaitingUnlock: false, repeat: event.repeat, abort: new AbortController(), event, attempting: false, attempts: 0, replacements: (old?.replacements ?? 0) + (old ? 1 : 0) };
     this.voices.set(event.id, voice);
+    this.allVoices.add(voice);
+    this.record('voice.created', voice, `animation=${event.animation} range=${event.start}..${event.end} tick=${logicalTick}`);
+    this.record('voice.state.pending', voice);
     const generation = this.generation;
     const url = this.resources[key] ?? this.resources[key.toLowerCase()];
-    if (!url) { handle.state = 'failed'; return handle; }
+    if (!url) { handle.state = 'failed'; this.record('voice.failed', voice, 'resource URL not found'); return handle; }
     voice.url = url;
     if (this.silent) {
       if (knownDuration !== undefined) { handle.state = 'playing'; return handle; }
@@ -148,7 +159,8 @@ export class SccAudioRuntime {
         if (this.disposed || generation !== this.generation || this.voices.get(event.id) !== voice) return;
         voice.duration = SccAudioRuntime.durationFromWav(bytes);
         handle.state = 'playing';
-      }, () => { if (!this.disposed && generation === this.generation) handle.state = 'failed'; });
+        this.record('voice.resource-ready', voice, `duration=${voice.duration}`);
+      }, (error) => { if (!this.disposed && generation === this.generation) { handle.state = 'failed'; this.record('voice.failed', voice, String(error)); } });
       return handle;
     }
     this.startBrowserPlayback(voice, generation);
@@ -158,35 +170,48 @@ export class SccAudioRuntime {
   async unlock(): Promise<void> {
     if (!this.backend || this.disposed) return;
     await this.backend.resume();
-    for (const voice of this.voices.values()) {
+    for (const voice of this.allVoices) {
       if (voice.handle.state === 'pending' && !voice.attempting && voice.url) this.startBrowserPlayback(voice, this.generation);
     }
   }
   get contextState(): string { return this.backend?.contextState ?? 'silent'; }
   get activePlaybackCount(): number { return this.backend?.activePlaybackCount ?? 0; }
   get backendCounts(): string { return this.backend?.debugCounts ?? 'n/a'; }
+  diagnostics(): readonly { time: number; event: string; voiceId?: number; url?: string; detail?: string }[] {
+    return [...this.diagnosticEvents, ...(this.backend?.diagnostics() ?? []).map(({ time, event, url, playbackId, detail }) => ({ time, event, voiceId: playbackId, url, detail }))].sort((a, b) => a.time - b.time);
+  }
 
   private startBrowserPlayback(voice: Voice, generation: number): void {
-    if (!voice.url || !this.scope) return;
+    if (!voice.url || !this.scope || voice.abort?.signal.aborted || voice.handle.state === 'stopped' || voice.handle.state === 'disposed') return;
     voice.awaitingUnlock = false;
     voice.attempting = true;
     voice.attempts++;
-    void this.scope.play(voice.url, { loop: voice.repeat }).then((playback) => {
+    this.record('voice.playback-request', voice, `attempt=${voice.attempts} context=${this.contextState}`);
+    void this.scope.play(voice.url, { loop: voice.repeat, signal: voice.abort?.signal }).then((playback) => {
       voice.attempting = false;
-      if (this.disposed || generation !== this.generation || this.voices.get(voice.event.id) !== voice) { voice.lastError = `stale callback disposed=${this.disposed} generation=${generation}/${this.generation} current=${this.voices.get(voice.event.id) === voice}`; playback.stop(); return; }
-      if (voice.finished) { playback.stop(); voice.handle.state = 'ended'; return; }
+      if (this.disposed || generation !== this.generation) { voice.lastError = `stale callback disposed=${this.disposed} generation=${generation}/${this.generation}`; this.record('voice.stale-playback-canceled', voice, voice.lastError); playback.stop(); return; }
+      // The logical duration may have released the SCC barrier while fetch or
+      // decode was pending. Never discard the now-ready source for that reason.
       voice.lastError = 'source started';
       voice.handle.playback = playback;
       voice.handle.state = 'playing';
+      this.record('voice.state.playing', voice, `playback=${playback.id}`);
+      this.record('voice.playing', voice, `playback=${playback.id} logicallyFinished=${voice.finished}`);
       void playback.finished.then(() => {
-        if (!this.disposed && generation === this.generation && this.voices.get(voice.event.id) === voice) {
+        if (!this.disposed && generation === this.generation) {
           voice.finished = true;
           if (voice.handle.state === 'playing') voice.handle.state = 'ended';
+          this.record('voice.state.ended', voice, `playback=${playback.id}`);
+          this.record('voice.playback-finished', voice, `playback=${playback.id}`);
         }
       });
     }, (error: unknown) => {
       voice.attempting = false;
       if (this.disposed || generation !== this.generation) return;
+      if (voice.abort?.signal.aborted || voice.handle.state === 'stopped' || voice.handle.state === 'disposed') {
+        this.record('voice.load-canceled', voice, String(error));
+        return;
+      }
       // Autoplay is a browser gate, not EOF. Other load/decode/start failures are terminal policy.
       const cause = error instanceof Error ? error.cause : undefined;
       voice.lastError = `${error instanceof Error ? error.name : typeof error}:${String(error)}${cause ? ` cause=${String(cause)}` : ''}`;
@@ -194,6 +219,8 @@ export class SccAudioRuntime {
         || (cause instanceof DOMException && cause.name === 'NotAllowedError');
       voice.awaitingUnlock = gestureRequired;
       voice.handle.state = gestureRequired ? 'pending' : 'failed';
+      this.record(gestureRequired ? 'voice.state.awaitingUnlock' : 'voice.state.failed', voice);
+      this.record(gestureRequired ? 'voice.awaiting-unlock' : 'voice.failed', voice, voice.lastError);
     });
   }
 
@@ -201,9 +228,11 @@ export class SccAudioRuntime {
     const voice = this.voices.get(eventId);
     voice?.abort?.abort();
     voice?.handle.stop();
+    if (voice) this.record('voice.state.stopped', voice, 'explicit Stop event');
+    if (voice) this.record('voice.stopped', voice, 'explicit Stop event');
   }
-  snapshot(): Array<{ id: number; state: AudioEventHandle['state']; finished: boolean; duration: number; lastPlay: number; repeat: boolean; attempting: boolean; attempts: number; replacements: number; error?: string }> {
-    return [...this.voices.entries()].map(([id, voice]) => ({ id, state: voice.handle.state, finished: voice.finished, duration: voice.duration, lastPlay: voice.lastPlay, repeat: voice.repeat, attempting: voice.attempting, attempts: voice.attempts, replacements: voice.replacements, error: voice.lastError }));
+  snapshot(): Array<{ id: number; voiceId: number; state: AudioEventHandle['state']; finished: boolean; duration: number; lastPlay: number; repeat: boolean; attempting: boolean; attempts: number; replacements: number; error?: string }> {
+    return [...this.voices.entries()].map(([id, voice]) => ({ id, voiceId: voice.instanceId, state: voice.handle.state, finished: voice.finished, duration: voice.duration, lastPlay: voice.lastPlay, repeat: voice.repeat, attempting: voice.attempting, attempts: voice.attempts, replacements: voice.replacements, error: voice.lastError }));
   }
   stopFirst(predicate: (eventId: number) => boolean): number | undefined {
     for (const [id, voice] of this.voices) if (predicate(id) && voice.handle.state === 'playing') { voice.handle.stop(); return id; }
@@ -212,10 +241,15 @@ export class SccAudioRuntime {
   dispose(): void {
     if (this.disposed) return;
     this.disposed = true; this.generation++;
-    for (const voice of this.voices.values()) voice.abort?.abort();
+    for (const voice of this.allVoices) { voice.abort?.abort(); this.record('voice.state.disposed', voice, 'scene disposal'); this.record('voice.disposed', voice, 'scene disposal'); }
     this.scope?.dispose();
     for (const handle of this.handles) { handle.state = 'disposed'; handle.playback?.stop(); }
-    this.handles.clear(); this.voices.clear();
+    this.handles.clear(); this.voices.clear(); this.allVoices.clear();
+  }
+  private record(event: string, voice?: Voice, detail?: string): void {
+    const diagnosticDetail = voice ? `eventId=${voice.event.id}${detail ? ` ${detail}` : ''}` : detail;
+    this.diagnosticEvents.push({ time: globalThis.performance?.now?.() ?? Date.now(), event, voiceId: voice?.instanceId, url: voice?.url, detail: diagnosticDetail });
+    if (this.diagnosticEvents.length > 2000) this.diagnosticEvents.splice(0, this.diagnosticEvents.length - 2000);
   }
 }
 
