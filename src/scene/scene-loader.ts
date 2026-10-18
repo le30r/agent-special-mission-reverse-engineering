@@ -80,6 +80,10 @@ export class SceneLoader {
   pending?: { scene: number; portal: number };
   constructor(readonly releaseProgram: () => void = () => {}) {}
   state(id: number): SceneState { let value = this.states.get(id); if (!value) { value = createSceneState(id); this.states.set(id,value); } return value; }
+  /** Cross-scene Click reads never allocate a scene or a missing object placeholder. */
+  readState(sceneId: number, name: string): number {
+    return this.states.get(sceneId)?.objects.get(name)?.state ?? 0;
+  }
   lstate(scene: number, name: string, value: number): void {
     const target = this.state(scene), old = target.objects.get(name);
     if (old) old.state = value; else if (!target.initialized) target.objects.set(name,{ name,state:value,depth:0,placeholder:true });
