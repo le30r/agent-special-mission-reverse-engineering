@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { decodeMult } from '../src/mult/decoder';
@@ -83,6 +83,40 @@ describe('SCC Fault declarations and selection', () => {
 });
 
 describe('cooperative SCC runtime', () => {
+  it('splits inline braces while preserving source line attribution across the SCC corpus', async () => {
+    const scripts = path.join(process.cwd(), 'agent-original/game-installed/Program_Executable_Files/Scripts');
+    const files = (await readdir(scripts)).filter((file) => file.endsWith('.scc')).sort();
+    expect(files).toHaveLength(57);
+    for (const file of files) {
+      const source = await readFile(path.join(scripts, file), 'utf8');
+      expect(parseScc(source), file).toHaveLength((source.match(/^\s*Click\s/img) ?? []).length);
+    }
+
+    const level38 = await readFile(path.join(scripts, 'Level38.scc'), 'utf8');
+    const handlers = parseScc(level38);
+    expect(handlers).toHaveLength(27);
+    expect(handlers.find((handler) => handler.event === 'Lora' && handler.itemId === 0)?.programs.get(1)?.commands).toEqual([
+      { op: 'Goto', x: 555, y: 498 }, { op: 'StartW', name: 'K_talke' },
+      { op: 'Setxy', x: 555, y: 497 }, { op: 'State', name: 'Lora', value: 2 },
+    ]);
+    expect(handlers.find((handler) => handler.event === 'Gungster' && handler.itemId === 4)?.programs.get(1)?.commands).toEqual([
+      { op: 'Goto', x: 655, y: 490 }, { op: 'Stop', name: 'Bandit1_c' },
+      { op: 'Stop', name: 'Bandit2_c' }, { op: 'StartW', name: 'Victoti' },
+      { op: 'Setxy', x: 650, y: 490 }, { op: 'State', name: 'Pank', value: 2 },
+      { op: 'Setmsk', path: 'Masks\\Scn_38.tif' }, { op: 'Cursor', name: 'Lora', value: 7 },
+      { op: 'State', name: 'Lora', value: 1 },
+    ]);
+
+    const inline = parseScc('Click 0 Demo Demo\n{ Case 1\n Addtol 1\n}\nClick 0 Next Next\n{\n Case 0\n Addtol 2\n Break\n}');
+    expect(inline).toHaveLength(2);
+    expect(inline[0].programs.get(1)?.commands).toEqual([{ op: 'Addtol', id: 1 }]);
+    expect(inline[1].programs.get(0)?.commands).toEqual([{ op: 'Addtol', id: 2 }]);
+
+    expect(parseFaultLists('Fault First 1 first.wav\n\nFault Broken nope.wav').diagnostics).toEqual([
+      'line 3: Fault Broken has invalid or missing count',
+    ]);
+  });
+
   it('parses Break at load time and suspends/resumes the bottle program in source order', async () => {
     const source=await readFile(path.join(process.cwd(),'agent-original/game-installed/Program_Executable_Files/Scripts/Level1.scc'),'utf8');
     const animationBytes=await readFile(path.join(process.cwd(),'agent-original/game-resources/block9/Xsh/Scn_37/Step_02.MULT'));
