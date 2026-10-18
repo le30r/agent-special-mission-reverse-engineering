@@ -64,7 +64,6 @@ export class SceneView {
   private heroIsObjectSpace = false;
   private tickNumber = 0;
   private readonly audio: SccAudioRuntime;
-  private readonly firedEffects = new Set<number>();
   private readonly latchedSounds = new Set<number>();
   private readonly soundEventsById = new Map<number, FrameSoundEvent>();
   private readonly activeBarriers = new Map<string, number>();
@@ -95,7 +94,7 @@ export class SceneView {
       loop: animation.loop,
       locomotion: animation.locomotion,
     })));
-    this.audio = new SccAudioRuntime(audioBackend, definition.audioResources, definition.id, !audioBackend, definition.audioDurations);
+    this.audio = new SccAudioRuntime(audioBackend, definition.audioResources, definition.id, !audioBackend, definition.audioDurations, definition.audioStorageModes);
     for (const event of definition.audioEvents) this.soundEventsById.set(event.id, event);
     this.scc = new SccRuntime(definition.scc, {
       pathActive: () => Boolean(this.movement && this.movement.remaining > 0),
@@ -417,6 +416,7 @@ export class SceneView {
       if (!this.player.selectLocomotion(name)) return;
       if (previous && previous !== name) this.traceVisual('Mainhero', this.hero, previous, this.player.state(previous)?.frame ?? 1, source);
     } else if (!this.player.start(name)) return;
+    this.activeBarriers.delete(name);
     this.applyAnimationFrame(name, this.player.state(name)?.frame ?? 1, source);
   }
 
@@ -428,6 +428,7 @@ export class SceneView {
       this.latchedSounds.delete(latched.id);
       if (this.activeBarriers.get(name) === latched.id) this.activeBarriers.delete(name);
     }
+    this.activeBarriers.delete(name);
     this.player.stop(name, true);
     if (/^(Walk|Stop|Mstop)/i.test(name)) {
       this.traceVisual('Mainhero', this.hero, name, this.player.state(name)?.frame ?? 1, 'SCC');
@@ -451,24 +452,16 @@ export class SceneView {
     this.tickNumber = tickNumber;
     this.scc.tick();
     this.updateSoundEvents(Math.trunc(elapsedNow));
-    for (const event of this.player.advance(Math.max(0, deltaMS))) {
-      const state = this.player.state(event.name);
+    this.player.advance(Math.max(0, deltaMS), (event) => {
+      // Poll immediately on EACH cursor transition. A range can rewind this very step.
+      this.updateSoundEvents(Math.trunc(elapsedNow), event.name, !event.active);
+      const state = this.player.state(event.name)!;
       const barrier = this.activeBarriers.get(event.name);
       const sound = barrier === undefined ? undefined : this.soundEventsById.get(barrier);
-      if (sound && !this.audio.isReady(barrier!, Math.trunc(elapsedNow))) {
-        // A one-frame Anim may hit its natural end while its sync Voice still owns the barrier.
-        this.player.setActive(event.name, true);
-        if (state && (state.frame > sound.end || !event.active)) {
-          this.player.setFrame(event.name, sound.start);
-          this.applyAnimationFrame(event.name, sound.start, 'animation-update', sound.objects);
-        } else if (event.frameChanged) {
-          this.applyAnimationFrame(event.name, event.frame, 'animation-update', sound.objects);
-        }
-      } else if (event.frameChanged) {
-        this.applyAnimationFrame(event.name, event.frame, 'animation-update', sound && barrier !== undefined ? sound.objects : undefined);
-      }
-      else this.traceVisual('Mainhero', this.hero, event.name, event.frame, 'animation-update');
-    }
+      if (event.frameChanged || state.active) {
+        this.applyAnimationFrame(event.name, state.frame, 'animation-update', sound?.objects);
+      } else this.traceVisual('Mainhero', this.hero, event.name, state.frame, 'animation-update');
+    });
     if (this.movement) this.advanceMovement(elapsedNow);
     if (!this.heroIsObjectSpace) {
       this.hero.x = this.heroPosition[0];
@@ -485,44 +478,43 @@ export class SceneView {
   }
 
   /** Poll frame hooks before frame advancement, preserving source-order handoff in one update. */
-  private updateSoundEvents(logicalTick: number): void {
+  private updateSoundEvents(logicalTick: number, onlyName?: string, naturalEnd = false): void {
     for (const [name, state] of this.player.states) {
-      if (!state.active) continue;
+      if (onlyName && onlyName !== name) continue;
+      if (!state.active && !naturalEnd) continue;
       const events = this.definition.audioEvents.filter((event) => event.animation === name);
       let index = 0;
       while (index < events.length) {
         const event = events[index++];
         if (event.end === -1) continue; // Depth mutation is parsed/applied by the existing depth-event path.
         if (event.end === 0) {
-          if (state.frame === event.start && !this.firedEffects.has(event.id)) {
-            this.firedEffects.add(event.id);
+          if (state.active && state.frame === event.start && this.audio.isReady(event.id, logicalTick)) {
             this.audio.play(event, logicalTick);
             if (event.repeat) this.latchedSounds.add(event.id);
           }
-          if (state.frame !== event.start) this.firedEffects.delete(event.id);
           continue;
         }
         const wasLatched = this.latchedSounds.has(event.id);
-        const step = stepSyncRange(event, state.frame, wasLatched, wasLatched && this.audio.isReady(event.id, logicalTick));
+        const cursor = naturalEnd && wasLatched ? event.end + 1 : state.frame;
+        const step = stepSyncRange(event, cursor, wasLatched, wasLatched && this.audio.isReady(event.id, logicalTick));
         if (step.started) {
           this.audio.play(event, logicalTick);
           this.latchedSounds.add(event.id);
           this.activeBarriers.set(name, event.id);
           // Native sets apply-all on first entry; following range updates are object-filtered.
-          this.applyAnimationFrame(name, event.start, 'animation-update');
+          this.applyAnimationFrame(name, state.frame, 'animation-update');
         }
         if (step.repeated) {
+          this.player.setActive(name, true);
           this.player.setFrame(name, step.frame);
           this.activeBarriers.set(name, event.id);
-          break;
         }
         if (step.completed) {
           this.latchedSounds.delete(event.id);
           this.activeBarriers.delete(name);
           this.player.setCursor(name, step.frame);
-        } else if (step.latched) {
+        } else if (step.latched && cursor >= event.start && cursor <= event.end + 1) {
           this.activeBarriers.set(name, event.id);
-          break;
         }
         // Continue to the next event: adjacent ranges hand off in this same update.
       }

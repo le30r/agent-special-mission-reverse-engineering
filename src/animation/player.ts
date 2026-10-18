@@ -101,7 +101,7 @@ export class AnimationPlayer {
   get currentLocomotion(): string | undefined { return this.locomotionName; }
 
   /** One source tick; callbacks happen only when the 1-based MULT frame changes. */
-  advance(deltaMs: number): AnimationAdvance[] {
+  advance(deltaMs: number, onStep?: (event: AnimationAdvance) => void): AnimationAdvance[] {
     const changed: AnimationAdvance[] = [];
     for (const definition of this.definitions.values()) {
       const state = this.states.get(definition.name)!;
@@ -115,11 +115,16 @@ export class AnimationPlayer {
           if (definition.loop) state.frame = 1;
           else {
             state.active = false;
-            changed.push({ name: definition.name, previousFrame: state.frame, frame: state.frame, active: false, frameChanged: false });
-            break;
+            const event = { name: definition.name, previousFrame: state.frame, frame: state.frame, active: false, frameChanged: false };
+            changed.push(event);
+            onStep?.(event);
+            if (!state.active) break;
+            continue;
           }
         } else state.frame++;
-        changed.push({ name: definition.name, previousFrame, frame: state.frame, active: state.active, frameChanged: true });
+        const event = { name: definition.name, previousFrame, frame: state.frame, active: state.active, frameChanged: true };
+        changed.push(event);
+        onStep?.(event);
       }
     }
     return changed;

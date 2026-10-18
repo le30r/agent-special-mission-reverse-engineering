@@ -92,6 +92,12 @@ async function waitForRuntimeResource(resource, afterCount = 0, timeoutMs = 1000
     return events.slice(afterCount).some((event) => event.event === 'voice.playing' && event.url?.toLowerCase().endsWith(resource.toLowerCase())) ? events : false;
   }, timeoutMs);
 }
+async function assertRuntimeEnded(resource, afterCount) {
+  const events = await evaluate('window.__audioDebug?.view()?.audio?.diagnostics?.() ?? []');
+  const matching = events.slice(afterCount).filter((event) => event.url?.toLowerCase().endsWith(resource.toLowerCase()));
+  assert(matching.some((event) => event.event === 'source.onended' && event.contextState === 'running'), `SCC continued before actual EOF of ${resource}`);
+  assert(matching.some((event) => event.event === 'voice.playback-finished'), `Voice not terminal at SCC continuation for ${resource}`);
+}
 async function canvasRect() {
   return await evaluate(`(() => {
     const canvas = document.querySelector('canvas');
@@ -183,6 +189,7 @@ try {
   const diagnosticsBeforePistol = await runtimeDiagnosticCount();
   await logicalClick(506, 569);
   text = await waitForPanel('inventory=[4]', 30000);
+  await assertRuntimeEnded('/KONST/002.WAV', diagnosticsBeforePistol);
   await waitForRuntimeResource('/KONST/002.WAV', diagnosticsBeforePistol);
   assert(text.includes('Nar.visible=false'), `Hide Nar after pistol pickup, got:\n${text}`);
   assert(text.includes('Pistol=removed/0x0/d1000'), `K_pistol frame 20 removes the pistol image, got:\n${text}`);
@@ -195,6 +202,7 @@ try {
   const diagnosticsBeforeBottle = await runtimeDiagnosticCount();
   await logicalClick(108, 342);
   text = await waitForPanel('level1.Botl.state=1', 30000);
+  await assertRuntimeEnded('/KONST/004.WAV', diagnosticsBeforeBottle);
   await waitForRuntimeResource('/KONST/004.WAV', diagnosticsBeforeBottle);
   assert(text.includes('inventory=[4,1]'), `pistol then bottle in inventory, got:\n${text}`);
   assert(text.includes('Botl=removed/0x0/d1000'), `bottle empty Takedr1 frame, got:\n${text}`);
@@ -237,6 +245,7 @@ try {
   const diagnosticsBeforeHammock = await runtimeDiagnosticCount();
   await logicalClick(slipScreenX, 365);
   text = await waitForPanel('Flag1.state=1', 30000);
+  await assertRuntimeEnded('/KONST/005.WAV', diagnosticsBeforeHammock);
   await waitForRuntimeResource('/KONST/005.WAV', diagnosticsBeforeHammock);
   assert(text.includes('Slip.state=3'), `State Slip 3 after the cut, got:\n${text}`);
   assert(text.includes('Lec_v.state=1'), `State Lec_v 1, got:\n${text}`);

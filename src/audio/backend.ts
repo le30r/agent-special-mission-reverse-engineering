@@ -51,6 +51,8 @@ export interface AudioBackendOptions {
   fetcher?: AudioFetcher;
   /** Approximate decoded PCM memory budget. Defaults to 32 MiB. */
   maxCacheBytes?: number;
+  /** Preparation error deadline, never a playback/EOF clock. */
+  prepareTimeoutMs?: number;
 }
 
 export type AudioDiagnostic = { time: number; event: string; url?: string; playbackId?: number; contextState: string; detail?: string };
@@ -93,9 +95,10 @@ class Playback implements PlaybackHandle {
     private readonly source: AudioBufferSourcePort,
     private readonly onFinish: (playback: Playback) => void,
     private readonly onStop: (playback: Playback, reason: string) => void,
+    private readonly onEnded: () => void,
   ) {
     this.finished = new Promise((resolve) => { this.finish = resolve; });
-    source.onended = () => this.complete();
+    source.onended = () => { this.onEnded(); this.complete(); };
   }
 
   get stopped(): boolean { return this.didStop; }
@@ -106,6 +109,7 @@ class Playback implements PlaybackHandle {
     if (this.didStop) return;
     this.didStop = true;
     this.onStop(this, reason);
+    this.source.onended = null;
     try { this.source.stop(); } catch { /* A source that already ended is already stopped. */ }
     this.complete();
   }
@@ -129,6 +133,7 @@ export class BrowserAudioBackend {
   private readonly context: AudioContextPort;
   private readonly fetcher: AudioFetcher;
   private readonly maxCacheBytes: number;
+  private readonly prepareTimeoutMs: number;
   private readonly cache = new Map<string, CacheEntry>();
   private readonly active = new Map<number, Playback>();
   private cacheBytes = 0;
@@ -146,6 +151,7 @@ export class BrowserAudioBackend {
     });
     this.context = options.context ?? factory();
     this.fetcher = options.fetcher ?? ((url, init) => fetch(url, init));
+    this.prepareTimeoutMs = options.prepareTimeoutMs ?? 30000;
     this.maxCacheBytes = Math.max(0, options.maxCacheBytes ?? 32 * 1024 * 1024);
   }
 
@@ -158,7 +164,7 @@ export class BrowserAudioBackend {
   async play(url: string, options: PlayOptions = {}): Promise<PlaybackHandle> {
     this.assertLive();
     if (options.signal?.aborted) throw new AudioAbortedError(url);
-    const buffer = await this.load(url, options.signal);
+    const buffer = await this.prepare(url, options.signal);
     this.assertLive();
     if (options.signal?.aborted) throw new AudioAbortedError(url);
 
@@ -168,10 +174,10 @@ export class BrowserAudioBackend {
     source.connect(this.context.destination);
     const id = this.nextPlaybackId++;
     const playback = new Playback(id, url, source, (ended) => {
-      this.record('source.onended', url, ended.id);
+      this.record('source.finished', url, ended.id);
       this.active.delete(ended.id);
       options.signal?.removeEventListener('abort', abortPlayback);
-    }, (stopped, reason) => this.record('source.stop', url, stopped.id, `reason=${reason}`));
+    }, (stopped, reason) => this.record('source.stop', url, stopped.id, `reason=${reason}`), () => this.record('source.onended', url, id));
     const abortPlayback = () => playback.stop('abort-signal');
     options.signal?.addEventListener('abort', abortPlayback, { once: true });
     this.active.set(id, playback);
@@ -216,6 +222,23 @@ export class BrowserAudioBackend {
     for (const playback of this.active.values()) playback.stop('backend-dispose');
     this.clearCache();
     await this.context.close();
+  }
+
+  private async prepare(url: string, signal?: AbortSignal): Promise<AudioBufferPort> {
+    const controller = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let onAbort: () => void = () => {};
+    const canceled = new Promise<never>((_, reject) => {
+      onAbort = () => { reject(new AudioAbortedError(url)); controller.abort(); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      timer = setTimeout(() => {
+        reject(new AudioLoadError(url, `Audio preparation timed out: ${url}`));
+        controller.abort();
+      }, this.prepareTimeoutMs);
+      if (signal?.aborted) onAbort();
+    });
+    try { return await Promise.race([this.load(url, controller.signal), canceled]); }
+    finally { clearTimeout(timer); signal?.removeEventListener('abort', onAbort); }
   }
 
   private async load(url: string, signal?: AbortSignal): Promise<AudioBufferPort> {
@@ -305,16 +328,16 @@ export class AudioResourceScope {
       this.controller.signal.addEventListener('abort', abortRequest, { once: true });
       options.signal?.addEventListener('abort', abortRequest, { once: true });
     }
-    let playback: PlaybackHandle;
-    try {
-      playback = await this.backend.play(url, { ...options, signal: request.signal });
-    } finally {
+    const cleanup = () => {
       this.controller.signal.removeEventListener('abort', abortRequest);
       options.signal?.removeEventListener('abort', abortRequest);
-    }
-    if (this.disposed) playback.stop();
+    };
+    let playback: PlaybackHandle;
+    try { playback = await this.backend.play(url, { ...options, signal: request.signal }); }
+    catch (error) { cleanup(); throw error; }
+    if (this.disposed || request.signal.aborted) playback.stop();
     else this.playbacks.add(playback);
-    void playback.finished.then(() => this.playbacks.delete(playback));
+    void playback.finished.then(() => { this.playbacks.delete(playback); cleanup(); });
     return playback;
   }
 
