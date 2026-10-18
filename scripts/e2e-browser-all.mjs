@@ -61,6 +61,7 @@ try {
     'e2e-browser-catalog.mjs',
     'e2e-browser-wav-runtime.mjs',
     'e2e-browser-scc-restored.mjs',
+    'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
   const from = startAt ? suite.indexOf(startAt) : 0;
