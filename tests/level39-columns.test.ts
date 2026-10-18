@@ -13,7 +13,7 @@ let catalog: TestSceneCatalog;
 let level39: SceneDefinition;
 
 beforeAll(async () => {
-  catalog = await loadTestSceneCatalog();
+  catalog = await loadTestSceneCatalog([1, 39]);
   level39 = catalogDefinition(catalog, 39);
 });
 

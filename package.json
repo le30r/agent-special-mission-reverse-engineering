@@ -5,7 +5,7 @@
   "packageManager": "pnpm@10.12.4",
   "type": "module",
   "scripts": {
-    "prepare:assets": "node scripts/prepare-assets.mjs",
+    "prepare:assets": "node --experimental-strip-types scripts/prepare-assets.mjs",
     "predev": "pnpm prepare:assets",
     "dev": "vite",
     "prebuild": "pnpm prepare:assets",
@@ -15,7 +15,11 @@
     "test:watch": "vitest",
     "e2e:browser": "node scripts/e2e-browser-transition.mjs",
     "e2e:browser:interactions": "node scripts/e2e-browser-level1-interactions.mjs",
-    "e2e:browser:columns": "node scripts/e2e-level39-columns.mjs"
+    "e2e:browser:columns": "node scripts/e2e-level39-columns.mjs",
+    "e2e:browser:scene38": "node scripts/e2e-browser-scene38.mjs",
+    "e2e:browser:level39-transitions": "node scripts/e2e-browser-level39-transitions.mjs",
+    "e2e:browser:catalog": "node scripts/e2e-browser-catalog.mjs",
+    "catalog:report": "node scripts/report-scene-catalog.mjs"
   },
   "dependencies": {
     "pixi.js": "^8.8.1",

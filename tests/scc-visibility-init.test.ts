@@ -10,7 +10,7 @@ import { collectAnimationExternalPaths } from '../src/scene/scene-source';
 import { catalogDefinition, loadTestSceneCatalog, type TestSceneCatalog } from './helpers/scene-catalog';
 
 let catalog: TestSceneCatalog;
-beforeAll(async () => { catalog = await loadTestSceneCatalog(); });
+beforeAll(async () => { catalog = await loadTestSceneCatalog([1, 39]); });
 const definition = (id: number): SceneDefinition => catalogDefinition(catalog, id);
 
 function testHost(state: SceneState, events: string[] = []): SccHost {
