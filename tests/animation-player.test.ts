@@ -35,6 +35,15 @@ describe('MULT animation clock', () => {
     expect(player.state('Stop6')?.frame).toBe(1);
   });
 
+  it('keeps the internal cursor at frameCount+1 after a completed final-frame sound range', () => {
+    const player = new AnimationPlayer([{ name: 'LastSound', rate: 10, frameCount: 17, loop: false }]);
+    player.start('LastSound');
+    player.setCursor('LastSound', 18);
+    expect(player.state('LastSound')?.frame).toBe(18);
+    expect(player.advance(100)).toEqual([{ name: 'LastSound', previousFrame: 18, frame: 18, active: false, frameChanged: false }]);
+    expect(player.isActive('LastSound')).toBe(false);
+  });
+
   it('SCC Stop deactivates and resets the frame to 1 without rewriting the image', () => {
     const player = new AnimationPlayer([{ name: 'Slip', rate: 4, frameCount: 9, loop: true }]);
     player.start('Slip');

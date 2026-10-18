@@ -7,6 +7,7 @@ import { InventoryView } from './scene/inventory-view';
 import { logicalScreenPoint } from './scene/active-hit';
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from './config';
 import './style.css';
+import { BrowserAudioBackend } from './audio/backend';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -62,6 +63,7 @@ function describeSession(session: SceneSession, manifest: { summary: { total: nu
     `scene=${definition.mask.width}x${definition.mask.height} focus=${definition.focus.join(' ')} portals=${definition.portals.length} animations=${definition.animations.size} layout=${definition.layoutAnimation ?? 'none'}`,
     `hero: depth=${status.depth} scale=${status.scale.toFixed(4)} scroll=${status.scroll} objects=${status.objects}`,
     `session: zone=${session.loader.game.zone} init=[${initRuns || 'none'}] transitions=[${session.transitionLog.join(' ')}] resources.loadedScenes=${provider.loadedCount}`,
+    `audio voices: ${view.audioReport() || 'none'}`,
     `lstate.placeholders=[${lstatePlaceholders}]`,
     ...(session.loadError ? [`loadError=${session.loadError.scene}: ${session.loadError.message}`] : []),
     objectStateLine(view),
@@ -131,12 +133,18 @@ async function main() {
   // only when a scene is entered. Nothing from the scene corpus is uploaded up front.
   const catalog = await loadSceneCatalog();
   const provider = new SceneAssetProvider(catalog.manifest);
+  let audioBackend: BrowserAudioBackend | undefined;
+  if (parameters.get('audio') !== 'silent' && typeof AudioContext !== 'undefined') {
+    try { audioBackend = new BrowserAudioBackend(); } catch (error) { console.warn('Web Audio unavailable; using deterministic silent timing backend', error); }
+  }
   const inventoryView = new InventoryView(catalog.interface.frame, catalog.interface.icons);
   overlay.addChild(inventoryView.root);
   const session = new SceneSession(stageRoot, provider, {
+    audioBackend,
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
+  if (sceneDebug) (window as Window & { __audioDebug?: unknown }).__audioDebug = { backend: audioBackend, view: () => session.view };
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
   session.flush();
@@ -170,8 +178,11 @@ async function main() {
   });
 
   app.canvas.addEventListener('pointerdown', (event) => {
+    // Unlock Web Audio from the user's gesture before SCC click handling.
+    if (audioBackend) void audioBackend.resume().catch((error) => console.warn('Audio unlock failed', error));
     const view = session.view;
     if (!view) return;
+    if (audioBackend) void view.unlockAudio().catch((error) => console.warn('Audio unlock failed', error));
     const [x, y] = screenPosition(app, event);
     // The inventory is a normal overlay: it consumes its clicks, and a selected
     // slot becomes SCC `scene+5` for the next scene click.

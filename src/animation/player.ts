@@ -41,6 +41,21 @@ export class AnimationPlayer {
   definition(name: string): AnimationDefinition | undefined { return this.definitions.get(name); }
   state(name: string): AnimationState | undefined { return this.states.get(name); }
   isActive(name: string): boolean { return this.states.get(name)?.active ?? false; }
+  setFrame(name: string, frame: number): void {
+    const state = this.states.get(name);
+    const definition = this.definitions.get(name);
+    if (state && definition) state.frame = Math.min(definition.frameCount, Math.max(1, Math.trunc(frame)));
+  }
+  /** Internal 1-based cursor may reach frameCount+1 after the final frame/event pass. */
+  setCursor(name: string, frame: number): void {
+    const state = this.states.get(name);
+    const definition = this.definitions.get(name);
+    if (state && definition) state.frame = Math.min(definition.frameCount + 1, Math.max(1, Math.trunc(frame)));
+  }
+  setActive(name: string, active: boolean): void {
+    const state = this.states.get(name);
+    if (state) state.active = active;
+  }
 
   /** Starting an SCC animation resets it, even if that same animation is active. */
   start(name: string): boolean {

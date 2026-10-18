@@ -15,6 +15,8 @@ import { firstHitTarget } from './object-hit';
 import { findFrameTarget } from './mult-target';
 import { multHitPixels } from '../mult/hit-pixels';
 import { VIEWPORT_WIDTH } from '../config';
+import { SccAudioRuntime, stepSyncRange, type FrameSoundEvent } from '../audio/scc-audio';
+import type { BrowserAudioBackend } from '../audio/backend';
 
 export { hitTest, type HitTarget } from './object-hit';
 
@@ -61,6 +63,11 @@ export class SceneView {
   private movement?: Movement;
   private heroIsObjectSpace = false;
   private tickNumber = 0;
+  private readonly audio: SccAudioRuntime;
+  private readonly firedEffects = new Set<number>();
+  private readonly latchedSounds = new Set<number>();
+  private readonly soundEventsById = new Map<number, FrameSoundEvent>();
+  private readonly activeBarriers = new Map<string, number>();
 
   constructor(
     readonly definition: SceneDefinition,
@@ -68,6 +75,7 @@ export class SceneView {
     background: Texture,
     hooks: SceneViewHooks,
     inventory: number[],
+    audioBackend?: BrowserAudioBackend,
   ) {
     this.heroPosition = [0, 0];
     this.heroDirection = state.savedDirection;
@@ -87,6 +95,8 @@ export class SceneView {
       loop: animation.loop,
       locomotion: animation.locomotion,
     })));
+    this.audio = new SccAudioRuntime(audioBackend, definition.audioResources, definition.id, !audioBackend, definition.audioDurations);
+    for (const event of definition.audioEvents) this.soundEventsById.set(event.id, event);
     this.scc = new SccRuntime(definition.scc, {
       pathActive: () => Boolean(this.movement && this.movement.remaining > 0),
       animationActive: (name) => this.player.isActive(name),
@@ -382,11 +392,17 @@ export class SceneView {
     this.traceVisual(record.name, object.sprite, animationName, frame, source);
   }
 
-  private applyAnimationFrame(name: string, frame: number, source: UpdateSource): void {
-    applyFrameDepthEvents(this.definition.frameDepthEvents, name, frame, (objectName, depth) => this.setObjectDepth(objectName, depth, { kind: 'fram', detail: `${name} frame ${frame}` }));
+  private applyAnimationFrame(name: string, frame: number, source: UpdateSource, objectFilter?: readonly string[]): void {
+    const allowed = objectFilter ? new Set(objectFilter) : undefined;
+    applyFrameDepthEvents(this.definition.frameDepthEvents, name, frame, (objectName, depth) => {
+      if (!allowed || allowed.has(objectName)) this.setObjectDepth(objectName, depth, { kind: 'fram', detail: `${name} frame ${frame}` });
+    });
     const animation = this.definition.animations.get(name);
     if (!animation) return;
-    for (const record of animation.file.frames[frame - 1] ?? []) this.applyRecord(record, animation.file, name, frame, source);
+    for (const record of animation.file.frames[frame - 1] ?? []) {
+      if (allowed && !allowed.has(record.name)) continue;
+      this.applyRecord(record, animation.file, name, frame, source);
+    }
   }
 
   setObjectDepth(name: string, depth: number, provenance: DepthProvenance = { kind: 'default', detail: 'unspecified' }): void {
@@ -406,6 +422,12 @@ export class SceneView {
 
   /** SCC `Stop name` (opcode 0x15): deactivate and reset the animation to frame 1. */
   private stopAnimation(name: string): void {
+    const latched = this.definition.audioEvents.find((event) => event.animation === name && this.latchedSounds.has(event.id));
+    if (latched) {
+      this.audio.stop(latched.id);
+      this.latchedSounds.delete(latched.id);
+      if (this.activeBarriers.get(name) === latched.id) this.activeBarriers.delete(name);
+    }
     this.player.stop(name, true);
     if (/^(Walk|Stop|Mstop)/i.test(name)) {
       this.traceVisual('Mainhero', this.hero, name, this.player.state(name)?.frame ?? 1, 'SCC');
@@ -428,8 +450,23 @@ export class SceneView {
   tick(deltaMS: number, elapsedNow: number, tickNumber: number): void {
     this.tickNumber = tickNumber;
     this.scc.tick();
+    this.updateSoundEvents(Math.trunc(elapsedNow));
     for (const event of this.player.advance(Math.max(0, deltaMS))) {
-      if (event.frameChanged) this.applyAnimationFrame(event.name, event.frame, 'animation-update');
+      const state = this.player.state(event.name);
+      const barrier = this.activeBarriers.get(event.name);
+      const sound = barrier === undefined ? undefined : this.soundEventsById.get(barrier);
+      if (sound && !this.audio.isReady(barrier!, Math.trunc(elapsedNow))) {
+        // A one-frame Anim may hit its natural end while its sync Voice still owns the barrier.
+        this.player.setActive(event.name, true);
+        if (state && (state.frame > sound.end || !event.active)) {
+          this.player.setFrame(event.name, sound.start);
+          this.applyAnimationFrame(event.name, sound.start, 'animation-update', sound.objects);
+        } else if (event.frameChanged) {
+          this.applyAnimationFrame(event.name, event.frame, 'animation-update', sound.objects);
+        }
+      } else if (event.frameChanged) {
+        this.applyAnimationFrame(event.name, event.frame, 'animation-update', sound && barrier !== undefined ? sound.objects : undefined);
+      }
       else this.traceVisual('Mainhero', this.hero, event.name, event.frame, 'animation-update');
     }
     if (this.movement) this.advanceMovement(elapsedNow);
@@ -445,6 +482,51 @@ export class SceneView {
     this.hero.zIndex = pixiDepthIndex(this.heroDepth);
     // Pixi renders children in the sorted array order, ascending zIndex.
     this.world.sortChildren();
+  }
+
+  /** Poll frame hooks before frame advancement, preserving source-order handoff in one update. */
+  private updateSoundEvents(logicalTick: number): void {
+    for (const [name, state] of this.player.states) {
+      if (!state.active) continue;
+      const events = this.definition.audioEvents.filter((event) => event.animation === name);
+      let index = 0;
+      while (index < events.length) {
+        const event = events[index++];
+        if (event.end === -1) continue; // Depth mutation is parsed/applied by the existing depth-event path.
+        if (event.end === 0) {
+          if (state.frame === event.start && !this.firedEffects.has(event.id)) {
+            this.firedEffects.add(event.id);
+            this.audio.play(event, logicalTick);
+            if (event.repeat) this.latchedSounds.add(event.id);
+          }
+          if (state.frame !== event.start) this.firedEffects.delete(event.id);
+          continue;
+        }
+        const wasLatched = this.latchedSounds.has(event.id);
+        const step = stepSyncRange(event, state.frame, wasLatched, wasLatched && this.audio.isReady(event.id, logicalTick));
+        if (step.started) {
+          this.audio.play(event, logicalTick);
+          this.latchedSounds.add(event.id);
+          this.activeBarriers.set(name, event.id);
+          // Native sets apply-all on first entry; following range updates are object-filtered.
+          this.applyAnimationFrame(name, event.start, 'animation-update');
+        }
+        if (step.repeated) {
+          this.player.setFrame(name, step.frame);
+          this.activeBarriers.set(name, event.id);
+          break;
+        }
+        if (step.completed) {
+          this.latchedSounds.delete(event.id);
+          this.activeBarriers.delete(name);
+          this.player.setCursor(name, step.frame);
+        } else if (step.latched) {
+          this.activeBarriers.set(name, event.id);
+          break;
+        }
+        // Continue to the next event: adjacent ranges hand off in this same update.
+      }
+    }
   }
 
   private advanceMovement(elapsedNow: number): void {
@@ -528,6 +610,7 @@ export class SceneView {
     }
     // The original clears active Programs even when no object was hit (0x40a1bc).
     this.scc.cancelActive();
+    this.audio.dispose();
     // `scene+5 != 0` suppresses click-to-walk; the selected item is only consumed
     // by a handled object event.
     if (selectedItem !== 0) return;
@@ -558,6 +641,17 @@ export class SceneView {
       active: Object.fromEntries([...this.definition.active.keys()].map((name) => [name, this.activeVisible(name)])),
     };
   }
+
+  audioReport(): string {
+    const voices = this.audio.snapshot().map((voice) => {
+      const event = this.soundEventsById.get(voice.id);
+      return `#${voice.id}:${event?.animation}[${event?.start}..${event?.end}]:${voice.state}/${voice.finished ? 'finished' : 'unfinished'}/${voice.duration}ms@${voice.lastPlay}/try${voice.attempts}/repl${voice.replacements}${voice.attempting ? '/loading' : ''}${voice.repeat ? '/repeat' : ''}${voice.error ? `(${voice.error})` : ''}`;
+    }).join(' ');
+    const active = [...this.player.states].filter(([, state]) => state.active).map(([name, state]) => `${name}@${state.frame}`).join(',');
+    const barriers = [...this.activeBarriers].map(([name, id]) => `${name}#${id}`).join(',');
+    return `context=${this.audio.contextState}/sources${this.audio.activePlaybackCount}/${this.audio.backendCounts} active=${active} barriers=${barriers} ${voices}`;
+  }
+  unlockAudio(): Promise<void> { return this.audio.unlock(); }
 
   /**
    * Structured form of the `?debug=depth` readout. `origin` is an analysis

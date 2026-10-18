@@ -5,6 +5,7 @@ import type { NavigationMask } from '../navigation/router';
 import type { SccPortal } from '../scc/runtime';
 import { parsePortals } from './scene-loader';
 import { SCENE_HEIGHT } from '../config';
+import { parseFrameSoundEvents, type FrameSoundEvent } from '../audio/scc-audio';
 
 export type SceneAnimation = { name: string; rate: number; loop: boolean; locomotion: boolean; file: MultFile };
 
@@ -36,6 +37,9 @@ export type SceneDefinition = {
   externalImages: ReadonlyMap<string, string>;
   /** Non-fatal resource problems discovered while loading this visit. */
   warnings: string[];
+  audioEvents: FrameSoundEvent[];
+  audioResources: Readonly<Record<string, string>>;
+  audioDurations: Readonly<Record<string, number>>;
 };
 
 export type SceneDefinitionInput = {
@@ -51,6 +55,8 @@ export type SceneDefinitionInput = {
   mults: ReadonlyMap<string, Uint8Array | ArrayBuffer | MultFile>;
   externalImages?: Readonly<Record<string, string>>;
   layoutAnimation?: string;
+  audioResources?: Readonly<Record<string, string>>;
+  audioDurations?: Readonly<Record<string, number>>;
 };
 
 /** Focus <A> <B> <C> feeds depth/scale: depth = q*B, scale = A/(A+depth)*C. */
@@ -176,5 +182,8 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     layout,
     externalImages,
     warnings,
+    audioEvents: parseFrameSoundEvents(declarationSource),
+    audioResources: input.audioResources ?? {},
+    audioDurations: input.audioDurations ?? {},
   };
 }

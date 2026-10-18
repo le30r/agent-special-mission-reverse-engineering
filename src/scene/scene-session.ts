@@ -3,6 +3,7 @@ import { SceneLoader, type SceneState } from './scene-loader';
 import type { SceneDefinition } from './scene-definition';
 import { computeEntry, type SceneEntry } from './scene-entry';
 import { SceneView, type SceneViewHooks } from './scene-view';
+import type { BrowserAudioBackend } from '../audio/backend';
 
 /** Resources prepared for one scene visit; released when the scene is left. */
 export type LoadedScene = { definition: SceneDefinition; background: Texture };
@@ -19,6 +20,7 @@ export type SceneProvider = {
 };
 
 export type SceneSessionOptions = {
+  audioBackend?: BrowserAudioBackend;
   /** Called when the SCC names a scene that is not in the prepared manifest. */
   onUnsupported?: (scene: number) => void;
   /** Called when a known scene fails to load; the current scene stays active. */
@@ -240,7 +242,7 @@ export class SceneSession {
         // long-lived State/depth/MULT reference/visibility of an already visited scene.
         declareSceneObjects(this.loader, state, scene.definition);
         const view = this.options.createView?.(scene.definition, state, scene.background, hooks, this.loader.inventory)
-          ?? new SceneView(scene.definition, state, scene.background, hooks, this.loader.inventory);
+          ?? new SceneView(scene.definition, state, scene.background, hooks, this.loader.inventory, this.options.audioBackend);
         entering = view;
         runtime.resources.add({ destroy: () => view.dispose() });
       },
