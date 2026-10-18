@@ -1,0 +1,65 @@
+{
+  "skipped": {
+    "events": [
+      {
+        "id": 2,
+        "animation": "Walk1",
+        "start": 2,
+        "end": 0,
+        "objects": [
+          "Mainhero"
+        ],
+        "value": "Sound\\Global\\Ylisa1.wav",
+        "repeat": false
+      },
+      {
+        "id": 3,
+        "animation": "Walk1",
+        "start": 14,
+        "end": 0,
+        "objects": [
+          "Mainhero"
+        ],
+        "value": "Sound\\Global\\Ylisa2.wav",
+        "repeat": false
+      }
+    ],
+    "stepped": {
+      "frames": [
+        2,
+        3,
+        4
+      ],
+      "voices": [
+        {
+          "id": 2,
+          "voiceId": 1,
+          "state": "playing",
+          "finished": false,
+          "duration": 226,
+          "lastPlay": 27,
+          "repeat": false,
+          "attempting": false,
+          "attempts": 0,
+          "replacements": 0
+        }
+      ]
+    },
+    "jumped": {
+      "frames": [
+        2,
+        3,
+        4
+      ],
+      "voices": []
+    }
+  },
+  "replay": {
+    "activeBefore": 2,
+    "first": "playing",
+    "second": "playing",
+    "activeAfter": 1,
+    "firstAfter": "playing",
+    "secondAfter": "stopped"
+  }
+}

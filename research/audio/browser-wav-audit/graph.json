@@ -1,0 +1,70 @@
+[
+  {
+    "phase": "before-policy",
+    "muted": false,
+    "muteCount": 0,
+    "gains": [],
+    "rms": 0.25,
+    "starts": 1
+  },
+  {
+    "phase": "after-e2e-policy",
+    "muted": true,
+    "muteCount": 2,
+    "gains": [
+      {
+        "gain": 0,
+        "connectedToDestination": true
+      }
+    ],
+    "rms": 0,
+    "starts": 1
+  },
+  {
+    "phase": "ordinary-game-navigation",
+    "muted": true,
+    "muteCount": 2,
+    "gains": [
+      {
+        "gain": 0,
+        "connectedToDestination": true
+      }
+    ],
+    "rms": 0,
+    "starts": 1
+  },
+  {
+    "phase": "mute-disabled-after-previous-run",
+    "muted": true,
+    "muteCount": 2,
+    "gains": [
+      {
+        "gain": 0,
+        "connectedToDestination": true
+      }
+    ],
+    "rms": 0,
+    "starts": 1
+  },
+  {
+    "phase": "after-e2e-disconnect-current-document",
+    "muted": true,
+    "muteCount": 3,
+    "gains": [
+      {
+        "gain": 0,
+        "connectedToDestination": true
+      }
+    ],
+    "rms": 0,
+    "starts": 1
+  },
+  {
+    "phase": "after-e2e-disconnect-reload",
+    "muted": false,
+    "muteCount": 0,
+    "gains": [],
+    "rms": 0.25,
+    "starts": 1
+  }
+]

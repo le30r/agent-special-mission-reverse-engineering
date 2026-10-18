@@ -1,0 +1,769 @@
+[
+  {
+    "phase": "fresh",
+    "scene": 1,
+    "muted": false,
+    "context": "suspended",
+    "disposed": false,
+    "active": 1,
+    "panel": "SCENE DEBUG · active=1 · catalog=47 loadable=47 incomplete=0 · loading=none\nscc=/resources/Level1.scc\nentry=init · pos=(1199,524) dir=6 · mask correction=0/0\nscene=1736x600 focus=120 1 1 portals=5 animations=47 layout=Startlevel\nhero: depth=12 scale=0.9091 scroll=599 objects=20\nsession: zone=3 init=[1:1] transitions=[boot->1:-1[boot]] resources.loadedScenes=1\naudio voices: context=suspended/sources1/load=0/decode=0/cache=1 active=Slip@5 barriers= #36:Slip[1..0]:playing/unfinished/2294ms@833/try1/repl0(source started)\nlstate.placeholders=[]\nscene.objects: Flag1=0/v Goto_10=0/v Goto_29=0/v Goto_5=0/v Light0=0/v Morda=0/v Nar=0/v Naruchniki=0/v Slip=1 Stat_v=1\nactive: Goto_5.visible=true Goto_11.visible=false\ninventory=[] selected=0\nlevel1.Botl.state=0 hidden=false · Pistol.state=0 hidden=false\nlevel1.Slip.state=1 · Flag1.state=0 · Lec_v.state=0 · Nar.visible=true\nsprites: Lec_v=visible/256x294/d100000@340.8,301.4 Goto_1=missing Pistol=visible/33x24/d1000@1104.7,569.1 Slip=visible/224x147/d17@303.2,319.4 Botl=visible/31x52/d1000@716.2,362.1",
+    "voices": [
+      {
+        "id": 36,
+        "voiceId": 1,
+        "state": "playing",
+        "finished": false,
+        "duration": 2294,
+        "lastPlay": 833,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0,
+        "error": "source started"
+      }
+    ],
+    "trace": [
+      {
+        "time": 888.8000000119209,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=36 animation=Slip range=1..0 tick=833"
+      },
+      {
+        "time": 888.8000000119209,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=36"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 attempt=1 context=suspended"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 900.6000000238419,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "bytes=202478"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1 logicallyFinished=false"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      }
+    ]
+  },
+  {
+    "phase": "after-walk-click",
+    "scene": 1,
+    "muted": false,
+    "context": "running",
+    "disposed": true,
+    "active": 0,
+    "panel": "SCENE DEBUG · active=1 · catalog=47 loadable=47 incomplete=0 · loading=none\nscc=/resources/Level1.scc\nentry=init · pos=(1178,505) dir=3 · mask correction=0/0\nscene=1736x600 focus=120 1 1 portals=5 animations=47 layout=Startlevel\nhero: depth=12 scale=0.9091 scroll=599 objects=20\nsession: zone=3 init=[1:1] transitions=[boot->1:-1[boot]] resources.loadedScenes=1\naudio voices: context=running/sources0/load=0/decode=0/cache=0 active=Walk3@2,Slip@6 barriers= #12:Walk6[2..0]:pending/unfinished/226ms@2000/try1/repl0\nlstate.placeholders=[]\nscene.objects: Flag1=0/v Goto_10=0/v Goto_29=0/v Goto_5=0/v Light0=0/v Morda=0/v Nar=0/v Naruchniki=0/v Slip=1 Stat_v=1\nactive: Goto_5.visible=true Goto_11.visible=false\ninventory=[] selected=0\nlevel1.Botl.state=0 hidden=false · Pistol.state=0 hidden=false\nlevel1.Slip.state=1 · Flag1.state=0 · Lec_v.state=0 · Nar.visible=true\nsprites: Lec_v=visible/256x294/d100000@340.8,301.4 Goto_1=missing Pistol=visible/33x24/d1000@1104.7,569.1 Slip=visible/224x147/d17@303.8,320.9 Botl=visible/31x52/d1000@716.2,362.1",
+    "voices": [
+      {
+        "id": 12,
+        "voiceId": 2,
+        "state": "pending",
+        "finished": false,
+        "duration": 226,
+        "lastPlay": 2000,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0
+      }
+    ],
+    "trace": [
+      {
+        "time": 888.8000000119209,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=36 animation=Slip range=1..0 tick=833"
+      },
+      {
+        "time": 888.8000000119209,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=36"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 attempt=1 context=suspended"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 900.6000000238419,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "bytes=202478"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1 logicallyFinished=false"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "voice.state.disposed",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 scene disposal"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "voice.disposed",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 scene disposal"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "source.stop",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "reason=explicit"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "source.onended",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.created",
+        "voiceId": 2,
+        "detail": "eventId=12 animation=Walk6 range=2..0 tick=2000"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.state.pending",
+        "voiceId": 2,
+        "detail": "eventId=12"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.playback-request",
+        "voiceId": 2,
+        "url": "/generated/audio/block0/Sound/Global/Ylisa1.WAV",
+        "detail": "eventId=12 attempt=1 context=running"
+      }
+    ]
+  },
+  {
+    "phase": "next-real-Fram-after-walk",
+    "scene": 1,
+    "muted": false,
+    "context": "running",
+    "disposed": true,
+    "active": 0,
+    "panel": "SCENE DEBUG · active=1 · catalog=47 loadable=47 incomplete=0 · loading=none\nscc=/resources/Level1.scc\nentry=init · pos=(1142,469) dir=3 · mask correction=0/0\nscene=1736x600 focus=120 1 1 portals=5 animations=47 layout=Startlevel\nhero: depth=14 scale=0.8955 scroll=599 objects=20\nsession: zone=3 init=[1:1] transitions=[boot->1:-1[boot]] resources.loadedScenes=1\naudio voices: context=running/sources0/load=0/decode=0/cache=0 active=Walk3@9,Slip@6,Takedr1@1 barriers=Takedr1#41 #12:Walk6[2..0]:pending/unfinished/226ms@2000/try1/repl0 #6:Walk3[2..0]:pending/unfinished/226ms@2083/try1/repl0 #41:Takedr1[1..1]:pending/unfinished/3029ms@2083/try1/repl0\nlstate.placeholders=[]\nscene.objects: Flag1=0/v Goto_10=0/v Goto_29=0/v Goto_5=0/v Light0=0/v Morda=0/v Nar=0/v Naruchniki=0/v Slip=1 Stat_v=1\nactive: Goto_5.visible=true Goto_11.visible=false\ninventory=[] selected=0\nlevel1.Botl.state=0 hidden=false · Pistol.state=0 hidden=false\nlevel1.Slip.state=1 · Flag1.state=0 · Lec_v.state=0 · Nar.visible=true\nsprites: Lec_v=visible/256x294/d100000@340.8,301.4 Goto_1=missing Pistol=visible/33x24/d1000@1104.7,569.1 Slip=visible/224x147/d17@303.8,320.9 Botl=visible/31x52/d1000@716.2,362.1",
+    "voices": [
+      {
+        "id": 12,
+        "voiceId": 2,
+        "state": "pending",
+        "finished": false,
+        "duration": 226,
+        "lastPlay": 2000,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0
+      },
+      {
+        "id": 6,
+        "voiceId": 3,
+        "state": "pending",
+        "finished": false,
+        "duration": 226,
+        "lastPlay": 2083,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0
+      },
+      {
+        "id": 41,
+        "voiceId": 4,
+        "state": "pending",
+        "finished": false,
+        "duration": 3029,
+        "lastPlay": 2083,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0
+      }
+    ],
+    "trace": [
+      {
+        "time": 888.8000000119209,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=36 animation=Slip range=1..0 tick=833"
+      },
+      {
+        "time": 888.8000000119209,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=36"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 attempt=1 context=suspended"
+      },
+      {
+        "time": 888.9000000059605,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 900.6000000238419,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "bytes=202478"
+      },
+      {
+        "time": 900.8000000119209,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.6000000238419,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1 logicallyFinished=false"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 902.7000000178814,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "voice.state.disposed",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 scene disposal"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "voice.disposed",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 scene disposal"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "source.stop",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "reason=explicit"
+      },
+      {
+        "time": 2012.2000000178814,
+        "event": "source.onended",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.created",
+        "voiceId": 2,
+        "detail": "eventId=12 animation=Walk6 range=2..0 tick=2000"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.state.pending",
+        "voiceId": 2,
+        "detail": "eventId=12"
+      },
+      {
+        "time": 2053.5,
+        "event": "voice.playback-request",
+        "voiceId": 2,
+        "url": "/generated/audio/block0/Sound/Global/Ylisa1.WAV",
+        "detail": "eventId=12 attempt=1 context=running"
+      },
+      {
+        "time": 2137.4000000059605,
+        "event": "voice.created",
+        "voiceId": 3,
+        "detail": "eventId=6 animation=Walk3 range=2..0 tick=2083"
+      },
+      {
+        "time": 2137.4000000059605,
+        "event": "voice.state.pending",
+        "voiceId": 3,
+        "detail": "eventId=6"
+      },
+      {
+        "time": 2137.4000000059605,
+        "event": "voice.playback-request",
+        "voiceId": 3,
+        "url": "/generated/audio/block0/Sound/Global/Ylisa1.WAV",
+        "detail": "eventId=6 attempt=1 context=running"
+      },
+      {
+        "time": 2137.600000023842,
+        "event": "voice.created",
+        "voiceId": 4,
+        "detail": "eventId=41 animation=Takedr1 range=1..1 tick=2083"
+      },
+      {
+        "time": 2137.600000023842,
+        "event": "voice.state.pending",
+        "voiceId": 4,
+        "detail": "eventId=41"
+      },
+      {
+        "time": 2137.600000023842,
+        "event": "voice.playback-request",
+        "voiceId": 4,
+        "url": "/generated/audio/block0/Sound/Scn_01/KONST/004.WAV",
+        "detail": "eventId=41 attempt=1 context=running"
+      }
+    ]
+  },
+  {
+    "phase": "before-scene-switch",
+    "scene": 1,
+    "muted": false,
+    "context": "suspended",
+    "disposed": false,
+    "active": 1,
+    "panel": "SCENE DEBUG · active=1 · catalog=47 loadable=47 incomplete=0 · loading=none\nscc=/resources/Level1.scc\nentry=init · pos=(1199,524) dir=6 · mask correction=0/0\nscene=1736x600 focus=120 1 1 portals=5 animations=47 layout=Startlevel\nhero: depth=12 scale=0.9091 scroll=599 objects=20\nsession: zone=3 init=[1:1] transitions=[boot->1:-1[boot]] resources.loadedScenes=1\naudio voices: context=suspended/sources1/load=0/decode=0/cache=1 active=Slip@5 barriers= #36:Slip[1..0]:playing/unfinished/2294ms@816/try1/repl0(source started)\nlstate.placeholders=[]\nscene.objects: Flag1=0/v Goto_10=0/v Goto_29=0/v Goto_5=0/v Light0=0/v Morda=0/v Nar=0/v Naruchniki=0/v Slip=1 Stat_v=1\nactive: Goto_5.visible=true Goto_11.visible=false\ninventory=[] selected=0\nlevel1.Botl.state=0 hidden=false · Pistol.state=0 hidden=false\nlevel1.Slip.state=1 · Flag1.state=0 · Lec_v.state=0 · Nar.visible=true\nsprites: Lec_v=visible/256x294/d100000@340.8,301.4 Goto_1=missing Pistol=visible/33x24/d1000@1104.7,569.1 Slip=visible/224x147/d17@303.2,319.4 Botl=visible/31x52/d1000@716.2,362.1",
+    "voices": [
+      {
+        "id": 36,
+        "voiceId": 1,
+        "state": "playing",
+        "finished": false,
+        "duration": 2294,
+        "lastPlay": 816,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0,
+        "error": "source started"
+      }
+    ],
+    "trace": [
+      {
+        "time": 866.5999999940395,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=36 animation=Slip range=1..0 tick=816"
+      },
+      {
+        "time": 866.5999999940395,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=36"
+      },
+      {
+        "time": 866.5999999940395,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 attempt=1 context=suspended"
+      },
+      {
+        "time": 866.5999999940395,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 878.4000000059605,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 878.5,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "bytes=202478"
+      },
+      {
+        "time": 878.5,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 880.7999999821186,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.7999999821186,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "eventId=36 playback=1 logicallyFinished=false"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      }
+    ]
+  },
+  {
+    "phase": "after-scene-switch",
+    "scene": 38,
+    "muted": false,
+    "context": "suspended",
+    "disposed": false,
+    "active": 3,
+    "panel": "SCENE DEBUG · active=38 · catalog=47 loadable=47 incomplete=0 · loading=none\nscc=/resources/Level38.scc\nentry=portal[0] · pos=(900,455) dir=5 · mask correction=32/6\nscene=1040x600 focus=140 1 2 portals=2 animations=64 layout=Startlevel\nhero: depth=182 scale=0.8696 scroll=240 objects=18\nsession: zone=3 init=[1:1,38:1] transitions=[boot->1:-1[boot] 1->38:0[debug]] resources.loadedScenes=1\naudio voices: context=suspended/sources3/load=0/decode=0/cache=2 active=Stop5@1,Bandit1_c@6,Bandit2_Lora@6,Lampa@5 barriers= #16:Lampa[1..0]:playing/unfinished/413ms@3349/try1/repl0(source started)\nlstate.placeholders=[]\nscene.objects: Arlecin=0/v Goto_1=0/v Goto_44=0/v Light0=0/v Ocno=0/v Zmei=0/v\nactive: Goto_5.visible=true Goto_11.visible=false\ninventory=[] selected=0\nlevel1.Botl.state=0 hidden=false · Pistol.state=0 hidden=false\nlevel1.Slip.state=1 · Flag1.state=0 · Lec_v.state=0 · Nar.visible=true\nsprites: Lec_v=missing Goto_1=missing Pistol=missing Slip=missing Botl=missing",
+    "voices": [
+      {
+        "id": 16,
+        "voiceId": 1,
+        "state": "playing",
+        "finished": false,
+        "duration": 413,
+        "lastPlay": 3349,
+        "repeat": false,
+        "attempting": false,
+        "attempts": 1,
+        "replacements": 0,
+        "error": "source started"
+      }
+    ],
+    "trace": [
+      {
+        "time": 866.5999999940395,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 878.4000000059605,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 878.5,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "bytes=202478"
+      },
+      {
+        "time": 878.5,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV"
+      },
+      {
+        "time": 880.7999999821186,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.7999999821186,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 880.9000000059605,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 3169.699999988079,
+        "event": "source.start.call",
+        "voiceId": 2,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 3169.7999999821186,
+        "event": "source.start.ok",
+        "voiceId": 2,
+        "url": "/generated/audio/block0/Sound/Scn_01/Eff/001.WAV",
+        "detail": "duration=2.2947845804988662"
+      },
+      {
+        "time": 3450.199999988079,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=16 animation=Lampa range=1..0 tick=3349"
+      },
+      {
+        "time": 3450.199999988079,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=16"
+      },
+      {
+        "time": 3450.199999988079,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "eventId=16 attempt=1 context=suspended"
+      },
+      {
+        "time": 3450.199999988079,
+        "event": "load.start",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV"
+      },
+      {
+        "time": 3457.7999999821186,
+        "event": "load.response",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 3458,
+        "event": "load.complete",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "bytes=36548"
+      },
+      {
+        "time": 3458,
+        "event": "decode.start",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV"
+      },
+      {
+        "time": 3458.699999988079,
+        "event": "decode.complete",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "duration=0.41306122448979593"
+      },
+      {
+        "time": 3458.699999988079,
+        "event": "buffer.ready",
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "duration=0.41306122448979593"
+      },
+      {
+        "time": 3458.9000000059605,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "eventId=16 playback=3"
+      },
+      {
+        "time": 3458.9000000059605,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "eventId=16 playback=3 logicallyFinished=false"
+      },
+      {
+        "time": 3458.9000000059605,
+        "event": "source.start.call",
+        "voiceId": 3,
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "duration=0.41306122448979593"
+      },
+      {
+        "time": 3458.9000000059605,
+        "event": "source.start.ok",
+        "voiceId": 3,
+        "url": "/generated/audio/block0/Sound/SCN_38/Eff/007.WAV",
+        "detail": "duration=0.41306122448979593"
+      }
+    ],
+    "oldAudio": {
+      "disposed": false,
+      "voices": [
+        {
+          "id": 36,
+          "voiceId": 2,
+          "state": "playing",
+          "finished": false,
+          "duration": 2294,
+          "lastPlay": 3066,
+          "repeat": false,
+          "attempting": false,
+          "attempts": 1,
+          "replacements": 1,
+          "error": "source started"
+        }
+      ]
+    }
+  }
+]

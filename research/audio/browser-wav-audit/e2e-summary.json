@@ -1,0 +1,48 @@
+{
+  "command": "E2E_CDP=http://127.0.0.1:9333 E2E_SCREENSHOT_DIR=/private/tmp/wav-audit/screens pnpm e2e:browser:interactions",
+  "result": "E2E LEVEL1 INTERACTIONS PASSED",
+  "sourceStartCount": 26,
+  "firstAudioDisposeTime": 25911,
+  "sourceStartsAfterDispose": [],
+  "razresEvents": [
+    {
+      "time": 31526.09999999404,
+      "event": "voice.created",
+      "voiceId": 37,
+      "detail": "eventId=32 animation=Razres range=10..0 tick=31215"
+    },
+    {
+      "time": 32160.09999999404,
+      "event": "voice.created",
+      "voiceId": 38,
+      "detail": "eventId=33 animation=Razres range=15..0 tick=31848"
+    },
+    {
+      "time": 32409.59999999404,
+      "event": "voice.created",
+      "voiceId": 39,
+      "detail": "eventId=34 animation=Razres range=17..17 tick=32098"
+    },
+    {
+      "time": 32409.59999999404,
+      "event": "voice.state.pending",
+      "voiceId": 39,
+      "detail": "eventId=34"
+    },
+    {
+      "time": 32409.59999999404,
+      "event": "voice.playback-request",
+      "voiceId": 39,
+      "url": "/generated/audio/block0/Sound/Scn_01/KONST/005.WAV",
+      "detail": "eventId=34 attempt=1 context=running"
+    },
+    {
+      "time": 38426.19999998808,
+      "event": "voice.logical-finished",
+      "voiceId": 39,
+      "url": "/generated/audio/block0/Sound/Scn_01/KONST/005.WAV",
+      "detail": "eventId=34 elapsed=6017 duration=6012"
+    }
+  ],
+  "rawLog": "/private/tmp/wav-audit/e2e.log"
+}

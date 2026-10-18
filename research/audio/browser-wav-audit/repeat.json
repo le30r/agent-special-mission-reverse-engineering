@@ -1,0 +1,134 @@
+{
+  "corpus": [
+    {
+      "name": "Level3",
+      "inlineDeclarations": [
+        "  Fram 1 0 1 Vent sound\\scn_03\\Eff\\005.wav Repeat",
+        "  Fram 1 0 1 Water sound\\scn_03\\Eff\\002.wav Repeat"
+      ],
+      "parsedRepeats": [],
+      "relevantEvents": [
+        {
+          "id": 22,
+          "animation": "Ventc",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Vent"
+          ],
+          "value": "sound\\scn_03\\Eff\\005.wav",
+          "repeat": false
+        },
+        {
+          "id": 23,
+          "animation": "Watc",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Water"
+          ],
+          "value": "sound\\scn_03\\Eff\\002.wav",
+          "repeat": false
+        }
+      ]
+    },
+    {
+      "name": "Level28",
+      "inlineDeclarations": [
+        "  Fram 1 0 1 Mainhero SOUND\\scn_28\\Eff\\Sea.wav Repeat"
+      ],
+      "parsedRepeats": [],
+      "relevantEvents": [
+        {
+          "id": 1,
+          "animation": "More_c",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Mainhero"
+          ],
+          "value": "SOUND\\scn_28\\Eff\\Sea.wav",
+          "repeat": false
+        }
+      ]
+    },
+    {
+      "name": "Level31",
+      "inlineDeclarations": [
+        "  Fram 1 0 1 Dog2 sound\\scn_31\\Eff\\002.wav Repeat",
+        "  Fram 1 0 1 Dog1 sound\\scn_31\\Eff\\002.wav Repeat"
+      ],
+      "parsedRepeats": [],
+      "relevantEvents": [
+        {
+          "id": 5,
+          "animation": "Dog2_c",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Dog2"
+          ],
+          "value": "sound\\scn_31\\Eff\\002.wav",
+          "repeat": false
+        },
+        {
+          "id": 6,
+          "animation": "Dog1_c",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Dog1"
+          ],
+          "value": "sound\\scn_31\\Eff\\002.wav",
+          "repeat": false
+        }
+      ]
+    },
+    {
+      "name": "Level36",
+      "inlineDeclarations": [
+        "  Fram 1 0 1 Fire sound\\scn_36\\Eff\\001.wav Repeat"
+      ],
+      "parsedRepeats": [],
+      "relevantEvents": [
+        {
+          "id": 19,
+          "animation": "Fire_Start",
+          "start": 1,
+          "end": 0,
+          "objects": [
+            "Fire"
+          ],
+          "value": "sound\\scn_36\\Eff\\001.wav",
+          "repeat": false
+        }
+      ]
+    }
+  ],
+  "inline": [
+    {
+      "id": 0,
+      "animation": "Test",
+      "start": 1,
+      "end": 0,
+      "objects": [
+        "Object"
+      ],
+      "value": "sound/test.wav",
+      "repeat": false
+    }
+  ],
+  "separate": [
+    {
+      "id": 0,
+      "animation": "Test",
+      "start": 1,
+      "end": 0,
+      "objects": [
+        "Object"
+      ],
+      "value": "sound/test.wav",
+      "repeat": true
+    }
+  ]
+}

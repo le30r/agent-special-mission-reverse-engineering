@@ -1,0 +1,128 @@
+{
+  "locked": {
+    "context": "suspended",
+    "time": 0,
+    "state": "playing",
+    "ready": true,
+    "trace": [
+      {
+        "time": 2018.699999988079,
+        "event": "voice.created",
+        "voiceId": 1,
+        "detail": "eventId=1 animation=Test range=1..1 tick=100"
+      },
+      {
+        "time": 2018.699999988079,
+        "event": "voice.state.pending",
+        "voiceId": 1,
+        "detail": "eventId=1"
+      },
+      {
+        "time": 2018.699999988079,
+        "event": "voice.playback-request",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "eventId=1 attempt=1 context=suspended"
+      },
+      {
+        "time": 2018.800000011921,
+        "event": "load.start",
+        "url": "/test.wav"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "voice.state.playing",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "eventId=1 playback=1"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "voice.playing",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "eventId=1 playback=1 logicallyFinished=false"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "load.response",
+        "url": "/test.wav",
+        "detail": "status=200 ok=true"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "load.complete",
+        "url": "/test.wav",
+        "detail": "bytes=1"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "decode.start",
+        "url": "/test.wav"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "decode.complete",
+        "url": "/test.wav",
+        "detail": "duration=1"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "buffer.ready",
+        "url": "/test.wav",
+        "detail": "duration=1"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "source.start.call",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "duration=1"
+      },
+      {
+        "time": 2018.9000000059605,
+        "event": "source.start.ok",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "duration=1"
+      },
+      {
+        "time": 2050.800000011921,
+        "event": "voice.logical-finished",
+        "voiceId": 1,
+        "url": "/test.wav",
+        "detail": "eventId=1 elapsed=1001 duration=1000"
+      }
+    ]
+  },
+  "cold": {
+    "ready": true,
+    "state": "pending",
+    "afterDispose": {
+      "state": "disposed",
+      "active": 0,
+      "trace": [
+        {
+          "time": 2052.300000011921,
+          "event": "load.start",
+          "url": "/test.wav",
+          "contextState": "suspended"
+        },
+        {
+          "time": 2052.4000000059605,
+          "event": "load.response",
+          "url": "/test.wav",
+          "contextState": "suspended",
+          "detail": "status=200 ok=true"
+        },
+        {
+          "time": 2052.4000000059605,
+          "event": "load.aborted",
+          "url": "/test.wav",
+          "contextState": "suspended",
+          "detail": "AudioAbortedError: Audio request was aborted: /test.wav"
+        }
+      ]
+    }
+  }
+}
