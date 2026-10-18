@@ -121,17 +121,24 @@ export function parseFclickBindings(source: string): Map<string, string> {
 
 /** Parses the implemented SCC subset. Break is a load-time program separator, not an opcode. */
 export function parseScc(source: string): SccHandler[] {
-  const lines = source.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  // Split braces into structural lines without losing the originating SCC line.
+  // Keep this normalization local to parseScc: other readers (notably Fault
+  // diagnostics) report physical source line numbers.
+  const lines = source.split(/\r?\n/).flatMap((line, sourceLine) =>
+    line.replace(/([{}])/g, '\n$1\n').split('\n')
+      .map((text) => ({ text: text.trim(), sourceLine: sourceLine + 1 }))
+      .filter((entry) => entry.text.length > 0),
+  );
   const handlers: SccHandler[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const click = lines[i].match(/^Click\s+(-?\d+)\s+(\S+)\s+(\S+)(?:\s+(-?\d+))?/i);
+    const click = lines[i].text.match(/^Click\s+(-?\d+)\s+(\S+)\s+(\S+)(?:\s+(-?\d+))?/i);
     if (!click) continue;
     const handler: SccHandler = { itemId: int(click[1]), event: click[2], stateObject: click[3], stateScene: click[4] === undefined ? -1 : int(click[4]), programs: new Map() };
-    while (i + 1 < lines.length && lines[i + 1] !== '{') i++;
+    while (i + 1 < lines.length && lines[i + 1].text !== '{') i++;
     i++;
     let current: SccProgram | undefined;
-    for (; i < lines.length && lines[i] !== '}'; i++) {
-      const tokens = lines[i].split(/\s+/);
+    for (; i < lines.length && lines[i].text !== '}'; i++) {
+      const tokens = lines[i].text.split(/\s+/);
       const word = tokens[0].toLowerCase();
       if (word === 'case') {
         // Case binds the CURRENT program list. Adjacent `Case 0; Case 1` labels share
