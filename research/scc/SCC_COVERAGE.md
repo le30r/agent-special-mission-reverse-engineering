@@ -2,6 +2,18 @@
 
 Date: 2026-10-18. Project: `agent-reverse` (Basic Memory).
 
+> **Superseded implementation snapshot / confirmed research update:** this audit
+> predates local master `e08f0f0`. Its source counts remain valid, but the current
+> matrix and native contracts are in [SCC_MISSING_OPCODES](SCC_MISSING_OPCODES.md).
+> All47 scenes (including6 null-layout overlays), recursive includes and WAV
+> runtime are now implemented. Setzon is **PARTIAL/incorrect**, not “full”: native
+> opcode0x21 unlocks a banked map slot; Setmap is opcode0x20 bank selection.
+> Block/Ublock use a boolean click→Plane/map gate, not an identified-block API.
+> Fclick is load-time animation metadata; its second use is **Level38:319**,
+> not Level10:319. Setbcr/remStartW are ignored tokens in this EXE, not missing
+> background/animation commands. Below, historical HYPOTHESIS/UNKNOWN statements
+> and implementation proposals are retained as audit history, not current facts.
+
 Scope: static audit of the complete extracted SCC corpus of «Агент: Особое
 задание» (2001). No game resource was modified, no Ghidra session was started
 for this audit — command semantics are cross-checked against the existing
