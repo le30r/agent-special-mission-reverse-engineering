@@ -8,6 +8,7 @@ import { logicalScreenPoint } from './scene/active-hit';
 import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from './config';
 import './style.css';
 import { BrowserAudioBackend } from './audio/backend';
+import { DebugPanel } from './scene/debug-panel';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -144,6 +145,8 @@ async function main() {
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
+  const debugPanel = sceneDebug ? new DebugPanel(catalog.manifest, session, inventoryView) : undefined;
+  if (debugPanel) host.appendChild(debugPanel.root);
   if (sceneDebug) {
     const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown };
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
@@ -154,7 +157,7 @@ async function main() {
   session.request(1, -1, 'boot');
   session.flush();
 
-  if (sceneDebug || depthDebug) host.appendChild(buildSceneControls(catalog.manifest, session));
+  if (depthDebug) host.appendChild(buildSceneControls(catalog.manifest, session));
 
   let tickNumber = 0;
   let elapsedNow = 0;
@@ -166,6 +169,7 @@ async function main() {
     session.flush();
     const view = session.view;
     inventoryView.setItems(session.loader.inventory);
+    debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
     if (depthPanel) depthPanel.textContent = view?.depthReport() ?? 'DEPTH DEBUG · no active scene';
     if (animationPanel) {
