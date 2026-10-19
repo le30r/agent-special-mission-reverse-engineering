@@ -1,7 +1,7 @@
 import { decodeMult, type MultFile, type MultObject } from '../mult/decoder';
 import { parseAnimationDeclarations, AnimationPlayer } from '../animation/player';
 import { parseFaultLists, parseFclickBindings, type FaultList } from '../scc/runtime';
-import { parseSceneDeclarations, parseFrameDepthEvents, type FrameDepthEvent, type SceneObjectDeclaration } from '../navigation/depth-sort';
+import { parseSceneDeclarations, parseFrameDepthEvents, type FrameDepthEvent, type SceneDeclarationIdentity, type SceneObjectDeclaration } from '../navigation/depth-sort';
 import type { NavigationMask } from '../navigation/router';
 import type { SccPortal } from '../scc/runtime';
 import { parsePortals } from './scene-loader';
@@ -34,6 +34,7 @@ export type SceneDefinition = {
   objects: Map<string, SceneObjectDeclaration>;
   active: Map<string, SceneObjectDeclaration>;
   lights: Map<string, SceneObjectDeclaration>;
+  declarationOrder?: SceneDeclarationIdentity[];
   frameDepthEvents: FrameDepthEvent[];
   animations: Map<string, SceneAnimation>;
   player: AnimationPlayer;
@@ -191,6 +192,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     objects: declarations.objects,
     active: declarations.active,
     lights: declarations.lights,
+    declarationOrder: declarations.order,
     frameDepthEvents: parseFrameDepthEvents(declarationSource),
     animations,
     player,

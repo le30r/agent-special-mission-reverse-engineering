@@ -3,6 +3,11 @@ import type { SceneDeclarationKind, SceneRect } from '../navigation/depth-sort';
 import { findNamedObject } from './object-identity';
 
 export type SceneImageReference = { file: string; frame: number; slot: number; child: number };
+export type Transform = { x: number; y: number; scaleX: number; scaleY: number; anchorX: number; anchorY: number };
+export type SavedImage = { kind: 'mult'; reference: SceneImageReference } | { kind: 'empty' } | { kind: 'unassigned' };
+export type SavedMap =
+  | { model: 'legacy-zone-v1'; zone: number }
+  | { model: 'banked-v1'; bank: 0 | 1; unlocked: [boolean[], boolean[]] };
 /**
  * Documented origin of the current painter depth. The original engine has no
  * provenance field; this is an analysis/debug annotation used by ?debug=depth.
@@ -25,17 +30,40 @@ export type SceneObjectState = {
    * until a later MULT frame assigns an image again.
    */
   imageHidden?: boolean;
-  /** `Active`/`Light` visibility byte (+0x297); Active starts hidden. */
+  /** Active/Light +0x297 visibility or effective base Object image visibility in the browser. */
   visible?: boolean;
   /** Hover cursor ID (+0x152), written by SCC `Cursor name value`. */
   cursorId?: number;
   /** Immutable `Active` world rectangle, copied from its declaration. */
   rect?: SceneRect;
+  /** Last assigned live sprite transform; absent until an image was placed. */
+  transform?: Transform;
   kind?: SceneDeclarationKind;
   placeholder?: boolean;
 };
 export type SceneState = { id: number; initialized: boolean; objects: Map<string, SceneObjectState>; portals: SccPortal[]; focus: [number, number, number]; savedPosition: [number, number]; savedDirection: number; declarations: string[] };
 export type SceneRuntime = { id: number; handlers: unknown[]; animations: unknown[]; resources: Set<{ destroy?: () => void }>; disposed: boolean };
+export type PersistentObjectState = {
+  name: string; state: number; depth: number; cursorId?: number; image: SavedImage;
+  transform?: Transform; visible?: boolean; rect?: SceneRect; kind?: SceneDeclarationKind; placeholder?: boolean;
+};
+export type PersistentSceneState = {
+  id: number; initialized: boolean; savedPosition: [number, number]; savedDirection: number; objects: PersistentObjectState[];
+};
+export type PersistentHeroState = {
+  position: [number, number]; direction: number; mode: 'navigation' | 'object' | 'hidden'; transform?: Transform;
+};
+export type PersistentWorldSnapshot = {
+  currentSceneId: number | null; scenes: PersistentSceneState[]; inventory: number[]; map: SavedMap; hero: PersistentHeroState | null;
+};
+
+const cloneRect = (rect: SceneRect): SceneRect => ({ left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom });
+const cloneTransform = (transform: Transform): Transform => ({ ...transform });
+export function cloneSavedMap(map: SavedMap): SavedMap {
+  return map.model === 'legacy-zone-v1'
+    ? { model: map.model, zone: map.zone }
+    : { model: map.model, bank: map.bank, unlocked: [map.unlocked[0].slice(), map.unlocked[1].slice()] };
+}
 export function createSceneState(id: number): SceneState {
   // savedDirection defaults to the verified initial pose (Level1 Init uses Stop6).
   return { id, initialized: false, objects: new Map(), portals: [], focus: [120,1,1], savedPosition: [0,0], savedDirection: 6, declarations: [] };
@@ -74,8 +102,11 @@ export function setStateDepth(state: SceneState, name: string, depth: number, pr
 export class SceneLoader {
   readonly states = new Map<number, SceneState>();
   readonly inventory: number[] = [];
-  /** Game-session state shared by every scene; SCC `Setzon` writes `zone`. */
-  readonly game = { zone: 0 };
+  /** Game-session map. `zone` is retained only for the existing debug readout. */
+  readonly game: { zone: number; map: SavedMap } = {
+    zone: 0,
+    map: { model: 'banked-v1', bank: 0, unlocked: [Array(7).fill(false), Array(7).fill(false)] },
+  };
   active?: SceneState;
   runtime?: SceneRuntime;
   pending?: { scene: number; portal: number };
@@ -103,6 +134,10 @@ export class SceneLoader {
     // only carries State forward (theme of 0x407c14 / 0x407ffc: objects and State stay).
     if (old) {
       object.state = old.state;
+      if (old.cursorId !== undefined) object.cursorId = old.cursorId;
+      if (old.rect !== undefined) object.rect = cloneRect(old.rect);
+      if (old.kind !== undefined) object.kind = old.kind;
+      if (old.transform !== undefined) object.transform = cloneTransform(old.transform);
       if (!old.placeholder) {
         object.depth = old.depth;
         object.depthProvenance = old.depthProvenance;
@@ -112,6 +147,61 @@ export class SceneLoader {
       }
     }
     scene.objects.set(object.name,object);
+    if (!scene.declarations.includes(object.name)) scene.declarations.push(object.name);
+  }
+
+  setMapBank(bank: number): void {
+    if (bank !== 0 && bank !== 1) return;
+    if (this.game.map.model === 'legacy-zone-v1') {
+      this.game.map = { model: 'banked-v1', bank, unlocked: [Array(7).fill(false), Array(7).fill(false)] };
+    } else this.game.map.bank = bank;
+  }
+
+  unlockMapZone(zone: number): void {
+    if (!Number.isInteger(zone) || zone < 0 || zone > 6) return;
+    if (this.game.map.model === 'legacy-zone-v1') {
+      this.game.map = { model: 'banked-v1', bank: 0, unlocked: [Array(7).fill(false), Array(7).fill(false)] };
+    }
+    this.game.map.unlocked[this.game.map.bank][zone] = true;
+    this.game.zone = zone;
+  }
+
+  /** Pure deep-copy export. Missing supported scenes get default records without being materialized in `states`. */
+  exportPersistentState(sceneIds: readonly number[], currentSceneId: number | null, live?: {
+    hero: PersistentHeroState; objects: ReadonlyMap<string, SceneObjectState>; savedPosition: [number, number]; savedDirection: number;
+  }): PersistentWorldSnapshot {
+    const ids = [...new Set([...sceneIds, ...this.states.keys()])].sort((a, b) => a - b);
+    const scenes = ids.map((id): PersistentSceneState => {
+      const state = this.states.get(id);
+      const objectMap = new Map(state?.objects ?? []);
+      if (id === currentSceneId && live) {
+        for (const [name, object] of live.objects) objectMap.set(name, object);
+      }
+      const names = [...(state?.declarations ?? []), ...[...objectMap.keys()].filter((name) => !(state?.declarations ?? []).includes(name))];
+      const objects = names.flatMap((name) => {
+        const object = objectMap.get(name);
+        if (!object) return [];
+        const image: SavedImage = object.imageHidden
+          ? { kind: 'empty' }
+          : object.mult ? { kind: 'mult', reference: { ...object.mult } } : { kind: 'unassigned' };
+        return [{
+          name: object.name, state: object.state, depth: object.depth,
+          ...(object.cursorId === undefined ? {} : { cursorId: object.cursorId }), image,
+          ...(object.transform === undefined ? {} : { transform: cloneTransform(object.transform) }),
+          ...(object.visible === undefined ? {} : { visible: object.visible }),
+          ...(object.rect === undefined ? {} : { rect: cloneRect(object.rect) }),
+          ...(object.kind === undefined ? {} : { kind: object.kind }),
+          ...(object.placeholder === undefined ? {} : { placeholder: object.placeholder }),
+        }];
+      });
+      const position = id === currentSceneId && live ? live.savedPosition : state?.savedPosition ?? [0, 0] as [number, number];
+      const direction = id === currentSceneId && live ? live.savedDirection : state?.savedDirection ?? 6;
+      return { id, initialized: state?.initialized ?? false, savedPosition: [position[0], position[1]], savedDirection: direction, objects };
+    });
+    return {
+      currentSceneId, scenes, inventory: this.inventory.slice(), map: cloneSavedMap(this.game.map),
+      hero: live ? { ...live.hero, position: [...live.hero.position] as [number, number], ...(live.hero.transform ? { transform: cloneTransform(live.hero.transform) } : {}) } : null,
+    };
   }
   schedule(scene: number, portal: number): void { this.pending = { scene,portal }; }
   /**

@@ -184,8 +184,20 @@ try {
   });
   const afterPickup = await evaluate(`(() => { const view=window.__sccDebug.view(); return {
     inventory:view.scc.inventory, ladder:view.objectDebug('Lest'),
-    hidden:view.state.objects.get('Lest')?.imageHidden, state:view.state.objects.get('Grandmother')?.state } })()`);
+    shadow:view.objectDebug('Lest_ten'), hidden:view.state.objects.get('Lest')?.imageHidden,
+    state:view.state.objects.get('Grandmother')?.state,
+    snapshot:(() => { const save=window.__sccDebug.session.capturePersistentState(); const scene=save.scenes.find((item)=>item.id===21);
+      return {hero:save.hero, initialized:scene?.initialized, ladder:scene?.objects.find((item)=>item.name==='Lest'),
+        shadow:scene?.objects.find((item)=>item.name==='Lest_ten'), inventory:save.inventory}; })() } })()`);
   assert(afterPickup.inventory.filter((item)=>item===29).length===1, `item 29 count: ${JSON.stringify(afterPickup.inventory)}`);
+  assert(afterPickup.snapshot.inventory.filter((item)=>item===29).length===1, `snapshot item 29 count: ${JSON.stringify(afterPickup.snapshot)}`);
+  assert(afterPickup.snapshot.ladder?.image.kind==='empty' && afterPickup.snapshot.ladder.visible===false,
+    `snapshot must preserve hidden Lest independently of State: ${JSON.stringify(afterPickup.snapshot.ladder)}`);
+  assert(afterPickup.snapshot.shadow?.image.kind==='mult'
+    && afterPickup.snapshot.shadow.image.reference.file==='K_lest'
+    && afterPickup.snapshot.shadow.image.reference.frame===12
+    && afterPickup.snapshot.shadow.visible===false,
+    `snapshot must retain the actual hidden Lest_ten frame and visibility: ${JSON.stringify(afterPickup.snapshot.shadow)}`);
   await screenshot('02-level21-ladder-picked-up.png');
 
   await clickCss(ladderPoint.x, ladderPoint.y);

@@ -6,7 +6,7 @@ import { AnimationPlayer } from '../animation/player';
 import { selectFaultVoiceIndex, SccRuntime, type FaultList } from '../scc/runtime';
 import type { SceneDefinition } from './scene-definition';
 import { normalizeExternalPath } from './scene-definition';
-import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneState } from './scene-loader';
+import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneObjectState, type SceneState, type Transform, type PersistentHeroState } from './scene-loader';
 import type { SceneEntry } from './scene-entry';
 import { cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
 import { activeHitTest, worldPointFromScreen } from './active-hit';
@@ -34,6 +34,7 @@ export type SceneViewHooks = {
   lstate(scene: number, name: string, value: number): void;
   /** SCC `Setzon` stores its int in game-session state. */
   setZone(zone: number): void;
+  setMap?(bank: number): void;
   /** State-only lookup that must not allocate an unvisited target scene. */
   readState?(scene: number, name: string): number;
 };
@@ -135,6 +136,7 @@ export class SceneView {
       showObject: (name) => this.setObjectVisible(name, true),
       hideObject: (name) => this.setObjectVisible(name, false),
       setZone: (zone) => hooks.setZone(zone),
+      setMap: (bank) => hooks.setMap?.(bank),
       setMask: (path) => this.setNavigationMask(path),
       setBlocked: (blocked) => { this.inputBlocked = blocked; },
       goto: (x, y) => this.goto(x, y),
@@ -159,6 +161,33 @@ export class SceneView {
 
   private get mask() { return this.activeMask; }
   get blocked(): boolean { return this.inputBlocked; }
+  get moving(): boolean { return Boolean(this.movement && this.movement.remaining > 0); }
+
+  /** Returns detached persistent fields without touching schedulers, route, sound or the live scene. */
+  capturePersistentState(): { hero: PersistentHeroState; objects: Map<string, SceneObjectState>; savedPosition: [number, number]; savedDirection: number } {
+    const objects = new Map<string, SceneObjectState>();
+    for (const [name, stored] of this.state.objects) {
+      const sprite = this.objects.get(name)?.sprite;
+      objects.set(name, {
+        ...stored,
+        ...(stored.mult ? { mult: { ...stored.mult } } : {}),
+        ...(stored.rect ? { rect: { ...stored.rect } } : {}),
+        ...(stored.transform ? { transform: { ...stored.transform } } : {}),
+        ...(sprite ? { transform: this.readTransform(sprite), visible: sprite.visible } : {}),
+      });
+    }
+    const heroTransform = this.readTransform(this.hero);
+    const hero: PersistentHeroState = {
+      position: [this.heroPosition[0], this.heroPosition[1]], direction: this.heroDirection,
+      mode: !this.hero.visible ? 'hidden' : this.heroIsObjectSpace ? 'object' : 'navigation',
+      transform: heroTransform,
+    };
+    return { hero, objects, savedPosition: [...this.heroPosition], savedDirection: this.heroDirection };
+  }
+
+  private readTransform(sprite: Sprite): Transform {
+    return { x: sprite.x, y: sprite.y, scaleX: sprite.scale.x, scaleY: sprite.scale.y, anchorX: sprite.anchor.x, anchorY: sprite.anchor.y };
+  }
   get activeMaskPath(): string {
     return this.activeMask === this.definition.mask
       ? this.definition.initialMaskPath
@@ -369,6 +398,8 @@ export class SceneView {
         this.hero.y = this.mask.height / 2 - record.y;
         this.hero.scale.set(1);
       } else this.hero.anchor.set(0.5, 1);
+      const heroState = this.state.objects.get('Mainhero');
+      if (heroState) heroState.transform = this.readTransform(this.hero);
       this.traceVisual('Mainhero', this.hero, animationName, frame, source);
       return;
     }
@@ -403,6 +434,7 @@ export class SceneView {
       if (!ext) {
         object.removed = true; object.sprite.visible = false;
         object.width = 0; object.height = 0; object.hitPixels = undefined;
+        this.storeObjectTransform(objectName, object.sprite);
         this.traceVisual(objectName, object.sprite, animationName, frame, source);
         return;
       }
@@ -416,12 +448,14 @@ export class SceneView {
         object.sprite.y = this.mask.height / 2 - record.y;
         object.sprite.scale.set(1);
       }
+      this.storeObjectTransform(objectName, object.sprite);
       this.traceVisual(objectName, object.sprite, animationName, frame, source);
       return;
     }
     if (!resolved.width || !resolved.height || !resolved.bgra) {
       object.removed = true; object.sprite.visible = false;
       object.width = 0; object.height = 0; object.hitPixels = undefined;
+      this.storeObjectTransform(objectName, object.sprite);
       this.traceVisual(objectName, object.sprite, animationName, frame, source);
       return;
     }
@@ -435,6 +469,7 @@ export class SceneView {
       object.sprite.y = this.mask.height / 2 - record.y;
       object.sprite.scale.set(1);
     }
+    this.storeObjectTransform(objectName, object.sprite);
     this.traceVisual(objectName, object.sprite, animationName, frame, source);
   }
 
@@ -488,6 +523,11 @@ export class SceneView {
     const stored = findNamedObject(this.state.objects.values(), name);
     if (stored) stored.cursorId = id;
     else this.state.objects.set(name, { name, state: 0, depth: 0, cursorId: id });
+  }
+
+  private storeObjectTransform(name: string, sprite: Sprite): void {
+    const stored = findNamedObject(this.state.objects.values(), name);
+    if (stored) { stored.transform = this.readTransform(sprite); stored.visible = sprite.visible; }
   }
 
   private stopLocomotion(source: UpdateSource): void {
@@ -805,6 +845,9 @@ export class SceneView {
    * definitions and shared textures stay alive; the hero position is remembered.
    */
   dispose(): void {
+    for (const [name, object] of this.objects) this.storeObjectTransform(name, object.sprite);
+    const heroState = findNamedObject(this.state.objects.values(), 'Mainhero');
+    if (heroState) heroState.transform = this.readTransform(this.hero);
     this.scc.cancelActive();
     this.audio.dispose();
     this.faultVoiceIds.clear();

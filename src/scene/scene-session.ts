@@ -1,5 +1,5 @@
 import type { Container, Texture } from 'pixi.js';
-import { SceneLoader, type SceneState } from './scene-loader';
+import { SceneLoader, type SceneState, type PersistentWorldSnapshot } from './scene-loader';
 import type { SceneDefinition } from './scene-definition';
 import { computeEntry, type SceneEntry } from './scene-entry';
 import { SceneView, type SceneViewHooks } from './scene-view';
@@ -55,23 +55,25 @@ class MapSceneProvider implements SceneProvider {
 
 /** Copies a scene's Object, Active and Light declarations into its long-lived state. */
 export function declareSceneObjects(loader: SceneLoader, state: SceneState, definition: SceneDefinition): void {
-  for (const declaration of definition.objects.values()) {
+  const order = definition.declarationOrder ?? [
+    ...[...definition.objects.values()].map(({ name }) => ({ kind: 'Object' as const, name })),
+    ...[...definition.active.values()].map(({ name }) => ({ kind: 'Active' as const, name })),
+    ...[...definition.lights.values()].map(({ name }) => ({ kind: 'Light' as const, name })),
+  ];
+  const seen = new Set<string>();
+  for (const identity of order) {
+    const key = `${identity.kind}:${identity.name}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const declarations = identity.kind === 'Object' ? definition.objects : identity.kind === 'Active' ? definition.active : definition.lights;
+    const declaration = declarations.get(identity.name);
+    if (!declaration) continue;
     loader.declareObject(state, {
-      name: declaration.name, state: 0, depth: declaration.depth, kind: 'Object',
-      depthProvenance: { kind: 'declaration', detail: `Level${definition.id}.scc Object` },
-    });
-  }
-  for (const declaration of definition.active.values()) {
-    loader.declareObject(state, {
-      name: declaration.name, state: 0, depth: declaration.depth,
-      rect: declaration.rect, kind: 'Active', visible: false,
-      depthProvenance: { kind: 'declaration', detail: `Level${definition.id}.scc Active` },
-    });
-  }
-  for (const declaration of definition.lights.values()) {
-    loader.declareObject(state, {
-      name: declaration.name, state: 0, depth: declaration.depth, kind: 'Light', visible: false,
-      depthProvenance: { kind: 'declaration', detail: `Level${definition.id}.scc Light` },
+      name: declaration.name, state: 0, depth: declaration.depth, kind: identity.kind,
+      cursorId: declaration.cursorId,
+      ...(identity.kind === 'Active' ? { rect: declaration.rect, visible: false } : {}),
+      ...(identity.kind === 'Light' ? { visible: false } : {}),
+      depthProvenance: { kind: 'declaration', detail: `Level${definition.id}.scc ${identity.kind}` },
     });
   }
 }
@@ -139,6 +141,15 @@ export class SceneSession {
   }
 
   get supportedScenes(): number[] { return [...this.provider.ids].sort((a, b) => a - b); }
+  /** Pure, detached snapshot of canonical scene state plus the active live pose. */
+  capturePersistentState(): PersistentWorldSnapshot {
+    const live = this.view?.capturePersistentState();
+    return this.loader.exportPersistentState(
+      this.supportedScenes,
+      this.view?.definition.id ?? this.loader.active?.id ?? null,
+      live,
+    );
+  }
   /** Scene currently being fetched, if any (debug/loading indicator). */
   get loading(): number | undefined {
     return this.pendingLoad && !this.pendingLoad.settled ? this.pendingLoad.id : undefined;
@@ -232,7 +243,8 @@ export class SceneSession {
     const hooks: SceneViewHooks = {
       level: (nextScene, nextPortal) => this.request(nextScene, nextPortal),
       lstate: (targetScene, name, value) => this.loader.lstate(targetScene, name, value),
-      setZone: (zone) => { this.loader.game.zone = zone; },
+      setZone: (zone) => this.loader.unlockMapZone(zone),
+      setMap: (bank) => this.loader.setMapBank(bank),
       readState: (targetScene, name) => this.loader.readState(targetScene, name),
     };
     const switched = this.loader.enterPending(

@@ -36,10 +36,13 @@ export type SceneRect = { left: number; top: number; right: number; bottom: numb
 export type SceneObjectDeclaration = { name: string; cursorId: number; depth: number; rect?: SceneRect };
 /** Object, Active and Light create different native vtable types with different Show/Hide slots. */
 export type SceneDeclarationKind = 'Object' | 'Active' | 'Light';
+export type SceneDeclarationIdentity = { kind: SceneDeclarationKind; name: string };
 export type SceneDeclarations = {
   objects: Map<string, SceneObjectDeclaration>;
   active: Map<string, SceneObjectDeclaration>;
   lights: Map<string, SceneObjectDeclaration>;
+  /** SCC declaration order across all vtable kinds. */
+  order: SceneDeclarationIdentity[];
 };
 
 /**
@@ -50,23 +53,27 @@ export function parseSceneDeclarations(scc: string): SceneDeclarations {
   const objects = new Map<string, SceneObjectDeclaration>();
   const active = new Map<string, SceneObjectDeclaration>();
   const lights = new Map<string, SceneObjectDeclaration>();
+  const order: SceneDeclarationIdentity[] = [];
   for (const line of scc.split(/\r?\n/)) {
     const tokens = line.trim().split(/\s+/);
     const kind = tokens[0]?.toLowerCase();
     if (tokens.length < 4) continue;
     if (kind === 'object') {
       objects.set(tokens[1], { name: tokens[1], cursorId: Number(tokens[2]), depth: Number(tokens[3]) });
+      order.push({ kind: 'Object', name: tokens[1] });
     } else if (kind === 'active') {
       if (tokens.length < 8) continue;
       active.set(tokens[1], {
         name: tokens[1], cursorId: Number(tokens[2]), depth: Number(tokens[3]),
         rect: { left: Number(tokens[4]), top: Number(tokens[5]), right: Number(tokens[6]), bottom: Number(tokens[7]) },
       });
+      order.push({ kind: 'Active', name: tokens[1] });
     } else if (kind === 'light') {
       lights.set(tokens[1], { name: tokens[1], cursorId: Number(tokens[2]), depth: Number(tokens[3]) });
+      order.push({ kind: 'Light', name: tokens[1] });
     }
   }
-  return { objects, active, lights };
+  return { objects, active, lights, order };
 }
 
 export function parseSceneObjectDepths(scc: string): Map<string, number> {
