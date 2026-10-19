@@ -138,8 +138,10 @@ try {
   assert(text.includes('scroll=352'), `Level39 entry scroll 352, got:\n${text}`);
   await screenshot('02-level39-after-goto5.png');
 
+  // A scene-entry StartW owns the global busy flag until its continuation ends.
+  text = await waitForPanel('scc.busy=false', 90000);
   await logicalClick(768, 400);
-  text = await waitForPanel('active=1', 30000);
+  text = await waitForPanel('active=1', 90000);
   assert(text.includes('39->1:1[SCC]'), `Goto_11 -> Level 1 1 was an SCC Level, got:\n${text}`);
   assert(text.includes('init=[1:1,39:1]'), `Init ran once per scene, got:\n${text}`);
   assert(text.includes('zone=2'), `Setzon value survived return to Level1, got:\n${text}`);

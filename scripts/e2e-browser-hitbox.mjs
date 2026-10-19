@@ -28,6 +28,7 @@ try {
   await waitFor('hitbox panel and debug API', () => evaluate("Boolean(document.querySelector('.hitbox-debug') && window.__sccDebug && window.__hitboxDebug)"));
   await evaluate("window.__sccDebug.session.request(3, 0, 'debug')");
   await waitFor('Level3', () => evaluate('window.__sccDebug.view()?.definition.id === 3'));
+  await waitFor('Level3 StartW continuation', () => evaluate("(()=>{const v=window.__sccDebug.view();return v.state.objects.get('Interface')?.state===1&&!v.scc.programs.some(p=>p.active)})()"), 120000);
   const initial = await evaluate(`(()=>{const v=window.__sccDebug.view();return {state:[...v.state.objects.values()].map(o=>[o.name,o.state,o.visible]),programs:v.scc.programs.length,scroll:v.scrollX,stool:v.objectDebug('Stool'),debug:v.hitboxDebugEnabled}})()`);
   assert(initial.debug, 'debug=hitbox enables observer');
   assert(initial.stool?.width > 0 && initial.stool.height > 0, `Level3 Stool geometry is available: ${JSON.stringify(initial.stool)}`);
@@ -41,16 +42,16 @@ try {
   assert(hovered.graphicsMode === 'none' && hovered.graphicsCommands > 0 && hovered.activeCount > 0, `Pixi Object/Active overlay is drawn as a non-interactive layer: ${JSON.stringify({mode:hovered.graphicsMode,commands:hovered.graphicsCommands,actives:hovered.activeCount})}`);
   assert(hovered.hits[0] === 'Stool' && hovered.hits.length >= 1, `diagnostic respects frontmost hit candidate: ${hovered.hits}`);
   assert(hovered.state.length === initial.state.length && hovered.programs === initial.programs, 'hover observation does not mutate SCC state or program count');
-  assert(hovered.panel.includes('Stool') && hovered.panel.includes('Case 0'), 'Level3 inspector reports stool and rejected current Case');
+  assert(hovered.panel.includes('Stool') && hovered.panel.includes('Case 1'), 'Level3 inspector reports stool and its selected Case');
   await move(point[0], point[1]);
   const canvas = await evaluate("(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return {x:r.left+(" + point[0] + "+.5)*r.width/800,y:r.top+(" + point[1] + "+.5)*r.height/600}})()");
   await page.send('Input.dispatchMouseEvent', { type: 'mousePressed', x: canvas.x, y: canvas.y, button: 'left', buttons: 1, clickCount: 1 });
   await page.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: canvas.x, y: canvas.y, button: 'left', buttons: 0, clickCount: 1 });
   const trace = await waitFor('click chain', () => evaluate("(()=>{const t=window.__sccDebug.view().hitboxSnapshot(" + point[0] + "," + point[1] + ").clickTrace;return t.includes('Pointer screen=')?t:false})()"));
   assert(trace.includes('Actual selected target: Stool'), `click chain records the actual selected target (not merely visual overlap): ${trace}`);
-  assert(trace.includes('SCC handler lookup') && trace.includes('Program dispatched: no'), `click chain explains SCC Case rejection: ${trace}`);
+  assert(trace.includes('SCC handler lookup') && trace.includes('Program dispatched: yes'), `click chain confirms SCC Case dispatch: ${trace}`);
   assert(trace.includes('Hit candidates (front to back):'), 'click chain lists every ordered hit candidate');
-  assert(trace.includes('Case 0: missing'), 'Level3 stool click is rejected because its current Interface state has no Case 0');
+  assert(trace.includes('Case 1: match'), 'Level3 stool click dispatches its valid Interface Case 1');
   console.log(JSON.stringify({ level: 3, hovered: Object.fromEntries(Object.entries(hovered.o).filter(([key]) => key !== 'hitPixels')), scroll: hovered.scroll, world: hovered.world, clickTrace: trace }, null, 2));
   console.log('CHROMIUM HITBOX E2E PASSED');
   page.socket.close();

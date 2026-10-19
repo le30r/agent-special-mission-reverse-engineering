@@ -273,6 +273,9 @@ try {
   await logicalClick(goto44X, 120);
   text = await waitForPanel('active=44', 90000);
   text = await waitForPanel('Lampochka=1', 90000);
+  // Arrival starts Level44's blocking Init animation; wait for its StartW owner
+  // to release busy before issuing the real pickup click.
+  text = await waitForPanel('scc.busy=false', 90000);
   await clickObject('Lampochka', text);
   text = await waitForPanel('inventory=[4,39,7]', 90000);
   await screenshot('06-level44-lamp-item-7.png');
@@ -291,18 +294,13 @@ try {
   await screenshot('07-level44-to38-state-1-hidden.png');
   assert(to38?.state === 1 && to38.visible && to38.rect, `original Level44 return link is ready from the earlier hammock route: ${JSON.stringify(to38)}`);
   await logicalClick((to38.rect.left + to38.rect.right) / 2 - to38.scroll, (to38.rect.top + to38.rect.bottom) / 2);
-  await sleep(500);
-  text = await panel();
-  if (!text.includes('active=38')) {
-    const afterTo38 = await evaluate(`(() => {
-      const view = window.__sccDebug?.view?.();
-      return { state: view?.state?.objects?.get('To_38')?.state ?? null, visible: view?.activeVisible?.('To_38') ?? false, busy: view?.scc?.busy ?? null, panel: document.querySelector('.scene-debug')?.textContent ?? '' };
-    })()`);
-    throw new Error(`native Level44 To_38 click did not transition; after=${JSON.stringify(afterTo38)}`);
-  }
+  text = await waitForPanel('active=38', 90000);
   assert(text.includes('Pank=3'), `Level38 puzzle state survived the original Level44 return:\n${text}`);
   await screenshot('07-level38-returned-with-lamp.png');
 
+  // Returning to Level38 replays its entry StartW; wait for K_slip before the
+  // later real item-on-Lamp_t click so the busy input gate does not swallow it.
+  text = await waitForPanel('scc.busy=false', 90000);
   await logicalClick(740, 580);
   await logicalClick(637, 68); // item 7 is packed slot 2 after [4,39,7]
   await logicalClick(450, 300);

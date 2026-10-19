@@ -167,15 +167,18 @@ async function main() {
   if (hitboxDebug) host.dataset.hitboxDebug = 'true';
   const hitboxPanel = hitboxDebug ? document.createElement('pre') : undefined;
   if (hitboxPanel) { hitboxPanel.className = 'hitbox-debug'; host.appendChild(hitboxPanel); }
-  const hitboxGraphics = new Graphics();
+  let hitboxGraphics = new Graphics();
   hitboxGraphics.eventMode = 'none';
+  const hitboxDebugApi: { graphics: Graphics; view: () => typeof session.view } | undefined = hitboxDebug
+    ? { graphics: hitboxGraphics, view: () => session.view }
+    : undefined;
   if (debugPanel) host.appendChild(debugPanel.root);
   if (sceneDebug || hitboxDebug) {
     const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown; __hitboxDebug?: unknown };
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
     debugWindow.__sccDebug = { session, view: () => session.view };
     debugWindow.__inventoryDebug = { view: () => ({ open: inventoryView.open, pendingSelection: inventoryView.pendingSelection }) };
-    if (hitboxDebug) debugWindow.__hitboxDebug = { graphics: hitboxGraphics, view: () => session.view };
+    if (hitboxDebugApi) debugWindow.__hitboxDebug = hitboxDebugApi;
   }
   if (saveDebug) {
     const debugWindow = window as Window & { __saveLoadDebug?: unknown };
@@ -202,7 +205,14 @@ async function main() {
     // A scene switch (including its lazy resource load) is applied only at this boundary.
     session.flush();
     const view = session.view;
-    if ((sceneDebug || hitboxDebug) && view && hitboxGraphics.parent !== view.root) view.root.addChild(hitboxGraphics);
+    if ((sceneDebug || hitboxDebug) && view && hitboxGraphics.parent !== view.root) {
+      // Scene roots destroy their children on release; the cross-scene debug overlay
+      // must be recreated instead of reattaching a destroyed GraphicsContext.
+      hitboxGraphics = new Graphics();
+      hitboxGraphics.eventMode = 'none';
+      view.root.addChild(hitboxGraphics);
+      if (hitboxDebugApi) hitboxDebugApi.graphics = hitboxGraphics;
+    }
     if (view) view.hitboxDebugEnabled = host.dataset.hitboxDebug === 'true';
     inventoryView.setItems(session.loader.inventory);
     debugPanel?.update();

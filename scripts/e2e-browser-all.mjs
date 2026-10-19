@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Starts an isolated Vite + headless Chromium pair, then runs every Chromium E2E. */
 import { spawn } from 'node:child_process';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -12,6 +12,7 @@ const cdpPort = Number(process.env.E2E_CDP_PORT ?? 9397);
 const baseUrl = `http://127.0.0.1:${port}/?debug=scenes`;
 const children = [];
 let chromeChild;
+let activeProfile;
 function start(command, args, options = {}) {
   const child = spawn(command, args, { cwd: root, stdio: 'inherit', ...options });
   children.push(child);
@@ -54,6 +55,7 @@ try {
   await waitFor(`${baseUrl}`, 'Vite');
   const suite = [
     'e2e-browser-transition.mjs',
+    'e2e-browser-level3-busy.mjs',
     'e2e-browser-level1-interactions.mjs',
     'e2e-level39-columns.mjs',
     'e2e-browser-scene38.mjs',
@@ -64,16 +66,16 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
-  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-hitbox.mjs']);
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
   if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
   const scripts = startAt && from < 0 ? [startAt] : suite.slice(from);
   for (const script of scripts) {
     console.log(`\n===== Chromium E2E: ${script} =====`);
-    const profile = await mkdtemp(path.join(os.tmpdir(), 'agent-revers-chromium-'));
+    activeProfile = await mkdtemp(path.join(os.tmpdir(), 'agent-revers-chromium-'));
     chromeChild = start(chrome, [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--autoplay-policy=no-user-gesture-required',
-      `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, 'about:blank',
+      `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*', `--user-data-dir=${activeProfile}`, 'about:blank',
     ], { stdio: 'ignore' });
     await waitFor(`http://127.0.0.1:${cdpPort}/json/version`, 'Chromium CDP');
     const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : script === 'e2e-browser-hitbox.mjs' ? `http://127.0.0.1:${port}/?debug=hitbox` : baseUrl;
@@ -83,9 +85,12 @@ try {
     chromeChild = undefined;
     const chromeIndex = children.indexOf(finishedChrome);
     if (chromeIndex >= 0) children.splice(chromeIndex, 1);
+    await rm(activeProfile, { recursive: true, force: true });
+    activeProfile = undefined;
   }
   console.log(`\nAll ${scripts.length} Chromium E2E scripts passed.`);
 } finally {
   await stop(chromeChild);
   for (const child of children.reverse()) if (child.exitCode === null) child.kill('SIGTERM');
+  if (activeProfile) await rm(activeProfile, { recursive: true, force: true });
 }
