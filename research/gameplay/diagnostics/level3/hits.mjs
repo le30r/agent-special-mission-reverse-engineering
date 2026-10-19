@@ -1,0 +1,12 @@
+import { ev } from './cdp.mjs';
+export async function probe(name) {
+    return ev(`(()=>{
+const v=window.__sccDebug.view(),t=v.objects.get(${JSON.stringify(name)});if(!t)return {name:${JSON.stringify(name)},missing:true};
+const hit=(o,x,y)=>{const a=Math.floor(x-o.sprite.x+o.width/2),b=Math.floor(y-o.sprite.y+o.height/2);return o.sprite.visible&&!o.removed&&o.hitPixels&&a>=0&&b>=0&&a<o.width&&b<o.height&&o.hitPixels[(b*o.width+a)*4+3]!==0};
+const ordered=[...v.objects.values()].sort((a,b)=>Math.abs(a.depth)-Math.abs(b.depth)||a.order-b.order);
+const active=(x,y)=>[...v.definition.active].filter(([n,d])=>v.activeVisible(n)&&d.rect&&x>d.rect.left&&x<d.rect.right&&y>d.rect.top&&y<d.rect.bottom).map(([n,d])=>({name:n,depth:d.depth}));
+let best,dist=Infinity; const counts={};
+for(let py=0;py<t.height;py++)for(let px=0;px<t.width;px++) {let x=Math.ceil(t.sprite.x-t.width/2)+px,y=Math.ceil(t.sprite.y-t.height/2)+py;if(!hit(t,x,y))continue;const ah=active(x,y),oh=ordered.filter(o=>Math.abs(o.depth)>0&&hit(o,x,y));const winner=ah[0]?.name??oh[0]?.name;counts[winner]=(counts[winner]??0)+1;const d=Math.hypot(px-t.width/2,py-t.height/2);if(winner===t.name&&d<dist&&x>=v.scrollX&&x<v.scrollX+800){dist=d;best={world:[x,y],screen:[x-v.scrollX,y],activeHits:ah,objectHits:oh.map(o=>({name:o.name,depth:o.depth,order:o.order}))}}}
+return {name:t.name,state:v.state.objects.get(t.name),declaration:v.definition.objects.get(t.name),spriteExists:true,visible:t.sprite.visible,removed:t.removed,inRenderTree:t.sprite.parent===v.world,bounds:{x:t.sprite.x,y:t.sprite.y,width:t.width,height:t.height},hitMask:t.hitPixels?.length,depth:t.depth,order:t.order,painter:v.world.children.indexOf(t.sprite),counts,best,handlers:v.scc.handlers.filter(h=>h.event===t.name).map(h=>({...h,programs:[...h.programs]}))};})()`);
+}
+export async function trace() { return ev(`(()=>{const v=window.__sccDebug.view();window.__trace=[];for(const [o,k] of [[v,'pointerDown'],[v.scc,'click'],[v.scc,'dispatch'],[v.scc,'cancelActive'],[v.scc,'addInventory']]){const fn=o[k].bind(o);o[k]=(...args)=>{const b={busy:v.scc.busy,interface:v.state.objects.get('Interface')?.state};const result=fn(...args);window.__trace.push({method:k,args,before:b,result,inventory:[...v.scc.inventory]});return result}};document.querySelector('canvas').addEventListener('pointerdown',e=>window.__trace.push({method:'browser.pointerdown',client:[e.clientX,e.clientY],target:e.target.tagName}),true)})()`); }

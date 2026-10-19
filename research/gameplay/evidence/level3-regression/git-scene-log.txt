@@ -1,0 +1,11 @@
+cc235b3 Implement transactional save and load core
+a3c6442 Add persistent world snapshot model
+7c76122 Fix case-insensitive SCC object resource binding
+c0fbab6 feat(scc): dispatch Fault through Speak scheduler
+43d20c0 feat(scc): integrate Fclick and scene input blocking
+768e973 feat(scc): add stateScene and StatrW compatibility
+45bb62c Fix WAV completion, frame dispatch, Repeat and Voice ownership
+356e03f Fix WAV scene audio lifecycle and isolate E2E mute
+7d5d749 Implement SCC WAV audio barriers
+d910b1d feat: discover and lazy-load all original scenes
+111fe31 feat: initial playable Agent browser engine
