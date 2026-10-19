@@ -82,6 +82,12 @@ export class InventoryView {
     this.drawIcons();
   }
 
+  /** Clears the inventory's pending choice without committing a scene selection. */
+  resetSelection(): void {
+    this.pendingSelection = 0;
+    this.drawIcons();
+  }
+
   private drawIcons(): void {
     this.icons.removeChildren().forEach((child) => child.destroy());
     this.items.filter((id) => id >= 0).forEach((id, ordinal) => {

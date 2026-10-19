@@ -14,3 +14,32 @@ canvas { display: block; image-rendering: auto; }
 .scene-controls button { padding: 3px 7px; color: #101010; background: #f0d089; border: 1px solid #b89a4e; border-radius: 4px; font: 11px/1.2 system-ui, sans-serif; cursor: pointer; }
 .scene-controls button:hover { background: #ffe4a3; }
 .scene-controls button.incomplete { background: #d9a0a0; border-color: #8a5252; }
+.debug-panel { position: fixed; z-index: 6; top: 10px; right: 12px; width: min(390px, calc(100vw - 24px)); max-height: calc(100vh - 20px); overflow: hidden; color: #f5e8c8; background: rgb(17 19 22 / 96%); border: 1px solid #a58a55; border-radius: 7px; box-shadow: 0 5px 24px #000a; font: 12px/1.35 ui-monospace, monospace; }
+.debug-panel header { display: flex; justify-content: space-between; padding: 9px 11px; background: #30291b; border-bottom: 1px solid #76643f; cursor: pointer; }
+.debug-panel.collapsed { width: auto; max-height: none; }
+.debug-panel.collapsed header { border-bottom: 0; }
+.debug-panel.collapsed .debug-panel-body { display: none; }
+.debug-panel header span { color: #c4b58f; font-size: 10px; }
+.debug-panel-body { max-height: calc(100vh - 62px); overflow: auto; }
+.debug-panel section { padding: 8px 10px; border-bottom: 1px solid #464239; }
+.debug-panel h3 { margin: 0 0 6px; color: #f0cf82; font: 600 12px/1.4 system-ui, sans-serif; }
+.debug-panel input, .debug-panel select, .debug-panel button { min-height: 27px; padding: 4px 6px; color: #f4f0e7; background: #282a2c; border: 1px solid #68645a; border-radius: 4px; font: 11px system-ui, sans-serif; }
+.debug-panel input[type="search"] { width: 100%; margin-bottom: 5px; }
+.debug-panel .debug-state-list + input[type="search"], .debug-panel input[aria-label="Фильтр SCC-переменных"] { width: 100%; margin-top: 5px; }
+.debug-panel select { max-width: 62%; margin-right: 5px; }
+.debug-panel button { cursor: pointer; }
+.debug-panel button:hover, .debug-panel button.selected { background: #574a2e; border-color: #d7b35f; }
+.debug-panel button:disabled { opacity: .45; cursor: not-allowed; }
+.debug-item-list { display: flex; flex-wrap: wrap; gap: 3px; max-height: 92px; overflow: auto; margin-bottom: 5px; }
+.debug-item-list button { min-height: 23px; padding: 2px 5px; }
+.debug-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.debug-current-inventory { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.debug-current-inventory button { min-height: 23px; }
+.debug-panel p { margin: 5px 0; color: #c8bea6; font-size: 10px; }
+.debug-scene-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; margin-top: 6px; }
+.debug-scene-grid button { min-height: 22px; padding: 2px; font-size: 10px; }
+.debug-state-list { max-height: 210px; overflow: auto; }
+.debug-state-row { display: grid; grid-template-columns: minmax(0, 1fr) 82px; align-items: center; gap: 6px; min-height: 26px; border-bottom: 1px solid #343434; }
+.debug-state-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.debug-state-row input { width: 82px; min-height: 23px; }
+@media (max-width: 600px) { .debug-panel { top: 5px; right: 5px; width: min(340px, calc(100vw - 10px)); max-height: 80vh; } .debug-panel-body { max-height: calc(80vh - 40px); } }
