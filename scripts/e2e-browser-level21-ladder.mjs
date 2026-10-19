@@ -55,6 +55,16 @@ async function clickCss(x, y) {
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x, y, button: 'left', clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x, y, button: 'left', clickCount: 1 });
 }
+async function pressKey(key, code, windowsVirtualKeyCode) {
+  await send('Input.dispatchKeyEvent', { type:'rawKeyDown', key, code, windowsVirtualKeyCode });
+  await send('Input.dispatchKeyEvent', { type:'keyUp', key, code, windowsVirtualKeyCode });
+}
+async function clickButton(text, selector='button') {
+  const point = await evaluate(`(() => { const item=[...document.querySelectorAll(${JSON.stringify(selector)})].find(button=>button.textContent.includes(${JSON.stringify(text)}));
+    if(!item)return null;item.scrollIntoView({block:'center'});const r=item.getBoundingClientRect();return{x:r.left+r.width/2,y:r.top+r.height/2,disabled:item.disabled}; })()`);
+  assert(point && !point.disabled, `button ${text} is visible and enabled: ${JSON.stringify(point)}`);
+  await clickCss(point.x, point.y);
+}
 async function objectPoint(name) {
   return await evaluate(`(() => {
     const view = window.__sccDebug.view();
@@ -208,6 +218,34 @@ try {
     return await evaluate("!window.__sccDebug.view().scc.busy && !window.__sccDebug.view().scc.programs.some((program)=>program.active)");
   });
 
+  // Full UI persistence check from the real Level21 ladder pickup.
+  await waitFor('safe Level21 save point', async () => await evaluate('window.__saveLoadDebug?.canSave().ok'));
+  await pressKey('F2','F2',113);
+  await waitFor('Level21 Save UI', async () => await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"));
+  await clickButton('Выбрать');
+  await evaluate("(()=>{const input=document.querySelector('[aria-label=\"Название сохранения\"]');input.value='Level21 ladder';input.dispatchEvent(new Event('input',{bubbles:true}))})()");
+  await clickButton('Сохранить в выбранный слот');
+  await waitFor('Level21 slot saved', async () => await evaluate("document.querySelector('.save-load-dialog')?.textContent.includes('Игра сохранена')"));
+  const slotEnvelope = await evaluate("localStorage.getItem('agent-revers.save.v1.slot.0')");
+  const savedPayload = slotEnvelope ? JSON.parse(slotEnvelope) : null;
+  assert(savedPayload?.integrity?.algorithm==='sha256-utf8','Level21 UI writes a SaveCodec envelope');
+  assert(JSON.parse(savedPayload.payload).world.activeLevel===21,'saved slot payload is Level21');
+  await send('Page.reload',{ignoreCache:true});
+  await waitFor('fresh page boot before Level21 restore', async () => await evaluate("Boolean(window.__saveLoadDebug&&window.__sccDebug?.view()?.definition.id===1)"));
+  await pressKey('F3','F3',114);
+  await waitFor('Level21 Load UI after reload', async () => await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"));
+  await clickButton('Загрузить','.sl-slot button');
+  await waitFor('Level21 restored through F3 UI', async () => await evaluate("document.querySelector('.save-load-overlay').hidden&&window.__sccDebug?.view()?.definition.id===21"));
+  const restored = await evaluate(`(() => { const session=window.__sccDebug.session, view=session.view, snapshot=session.capturePersistentState(), scene=snapshot.scenes.find(item=>item.id===21);
+    return { level:view.definition.id, inventory:snapshot.inventory, hero:snapshot.hero, initRuns:[...session.initRuns], grandmother:scene?.objects.find(item=>item.name==='Grandmother')?.state,
+      ladder:scene?.objects.find(item=>item.name==='Lest'), shadow:scene?.objects.find(item=>item.name==='Lest_ten') } })()`);
+  assert(restored.level===21 && restored.inventory.filter(item=>item===29).length===1,'F3 restores Level21 and item 29 after full reload');
+  assert(restored.grandmother===1,'Grandmother state restored from the slot');
+  assert(!restored.initRuns.some(([id])=>id===21),'Level21 Init did not run again after the page reload and transactional restore');
+  assert(restored.ladder?.image.kind==='empty'&&restored.ladder.visible===false,'restored ladder remains hidden');
+  assert(restored.shadow?.visible===false,'restored ladder shadow remains hidden');
+  assert(restored.hero?.position?.length===2,'restored hero position is present');
+
   // Navigate through the real To_20/To_21 pair and make sure SCC Object hidden
   // state survives scene disposal/recreation rather than only the current sprite.
   const to20 = await activePoint('To_20');
@@ -225,7 +263,7 @@ try {
   });
   const reentry = await evaluate("({ladder:window.__sccDebug.view().objectDebug('Lest'),inventory:window.__sccDebug.view().scc.inventory})");
   assert(reentry.ladder?.sprite==='hidden' && reentry.inventory.filter((item)=>item===29).length===1, `re-entry restored ladder or lost item: ${JSON.stringify(reentry)}`);
-  console.log(JSON.stringify({ initial, ladderPoint, debugPreparation: 'Grandmother=1 set through SCC State Inspector UI', afterPickup, afterRepeat, reentry }, null, 2));
+  console.log(JSON.stringify({ initial, ladderPoint, debugPreparation: 'Grandmother=1 set through SCC State Inspector UI', afterPickup, afterRepeat, restored, reentry }, null, 2));
   console.log(`Screenshots: ${path.join(outputDir,'01-level21-ladder-visible.png')} · ${path.join(outputDir,'02-level21-ladder-picked-up.png')}`);
   console.log('LEVEL21 LADDER E2E PASSED');
 } finally {
