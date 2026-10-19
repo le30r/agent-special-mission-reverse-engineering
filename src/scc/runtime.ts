@@ -14,6 +14,7 @@ export type SccCommand =
   | { op: 'Goport'; portal: number }
   | { op: 'Lstate'; scene: number; name: string; value: number }
   | { op: 'Show' | 'Hide'; name: string }
+  | { op: 'Setmap'; value: number }
   | { op: 'Setzon'; value: number }
   | { op: 'SclipW'; value: number; file: string }
   | { op: 'Smusic'; value: number; file: string };
@@ -39,6 +40,8 @@ export type SccHost = {
   hideObject?(name: string): void;
   /** `Setzon` writes one int into game-session state. */
   setZone?(zone: number): void;
+  /** `Setmap` selects one of the two persistent map banks. */
+  setMap?(bank: number): void;
   setMask?(path: string): void;
   setBlocked?(blocked: boolean): void;
   /** Optional navigation request used by SCC `Goto`/`Goport`. */
@@ -171,6 +174,7 @@ export function parseScc(source: string): SccHandler[] {
       else if (word === 'lstate') commands.push({ op: 'Lstate', name: tokens[1], value: int(tokens[2]), scene: int(tokens[3]) });
       else if (word === 'show' || word === 'hide') commands.push({ op: word === 'show' ? 'Show' : 'Hide', name: tokens[1] });
       else if (word === 'setzon') commands.push({ op: 'Setzon', value: int(tokens[1]) });
+      else if (word === 'setmap') commands.push({ op: 'Setmap', value: int(tokens[1]) });
       else if (word === 'sclipw') commands.push({ op: 'SclipW', value: int(tokens[1]), file: tokens[2] ?? '' });
       else if (word === 'smusic') commands.push({ op: 'Smusic', value: int(tokens[1]), file: tokens[2] ?? '' });
     }
@@ -301,7 +305,13 @@ export class SccRuntime {
       // Opcode 0x11 -> 0x40c4dc -> 0x40ec50: clear every one of the 100 slots equal to the ID.
       if (command.op === 'Remtol') { this.removeInventory(command.id); state.pc++; continue; }
       if (command.op === 'Cursor') { this.host.setCursor?.(command.name, command.value); state.pc++; continue; }
-      if (command.op === 'State') { this.states.set(command.name, command.value); this.host.writeState?.(command.name, command.value); state.pc++; continue; }
+      if (command.op === 'State') {
+        // Keep the historical runtime lookup cache for hosts without a State
+        // binding; production snapshots still export only the SceneLoader owner.
+        this.states.set(command.name, command.value);
+        this.host.writeState?.(command.name, command.value);
+        state.pc++; continue;
+      }
       if (command.op === 'Objzet') { this.host.setDepth(command.name, command.value); state.pc++; continue; }
       if (command.op === 'Level') { this.host.level?.(command.scene, command.portal); state.pc++; continue; }
       if (command.op === 'Goport') {
@@ -318,6 +328,7 @@ export class SccRuntime {
         state.pc++;
         continue;
       }
+      if (command.op === 'Setmap') { this.host.setMap?.(command.value); state.pc++; continue; }
       // Temporary faithful-enough video contract: suspend for exactly one poll so Init
       // cannot finish synchronously, then continue automatically. The loader's Start
       // dispatch happens before the next tick resumes this Program.

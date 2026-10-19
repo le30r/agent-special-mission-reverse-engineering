@@ -186,8 +186,8 @@ describe('base Object Show/Hide asymmetry', () => {
     applyObjectVisibility(visibility, state, 'Botl', false);
     expect(applyObjectVisibility(visibility, state, 'Botl', true).changed).toBe(false);
     expect(bottle.imageHidden).toBe(true);
-    // A base Object never gains the Active/Light +0x297 field.
-    expect(bottle.visible).toBeUndefined();
+    // Base Object visibility is effective image visibility, separate from the Active/Light native byte.
+    expect(bottle.visible).toBe(false);
   });
 });
 

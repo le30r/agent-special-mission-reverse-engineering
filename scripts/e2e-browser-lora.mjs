@@ -208,9 +208,18 @@ try {
   await logicalClick(lora.x - loraScroll, lora.y);
   text = await waitForPanel('Lora=2', 90000);
   assert(text.includes('Lora=2'), `Lora conversation started (State Lora 2), got:\n${text}`);
+  const persistentState = await evaluate(`(() => { const save=window.__sccDebug.session.capturePersistentState();
+    const scene=save.scenes.find((item)=>item.id===38);
+    return {inventory:save.inventory, scene:{initialized:scene?.initialized,
+      lora:scene?.objects.find((item)=>item.name==='Lora'), pank:scene?.objects.find((item)=>item.name==='Pank')}}; })()`);
+  assert(persistentState.scene.initialized, `Level38 initialized in snapshot: ${JSON.stringify(persistentState)}`);
+  assert(persistentState.scene.lora?.state===2 && persistentState.scene.lora.cursorId===7,
+    `Lora State/cursor persisted: ${JSON.stringify(persistentState.scene.lora)}`);
+  assert(persistentState.inventory.includes(4), `inventory persisted through Lora conversation: ${JSON.stringify(persistentState.inventory)}`);
   await screenshot('04-lora-conversation.png');
 
   console.log('\nFINAL DEBUG PANEL\n' + text);
+  console.log('\nPERSISTENT SNAPSHOT\n' + JSON.stringify(persistentState));
   console.log('\nE2E LORA CONVERSATION PASSED');
 } finally {
   socket.close();

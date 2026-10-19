@@ -2,6 +2,16 @@
 
 Обновлено: 2026-10-19.
 
+## Постоянное состояние мира (подготовка Save/Load)
+
+- `SceneSession.capturePersistentState()` возвращает независимое plain-data представление: текущую сцену, записи всех 47 доступных scene ID (включая непосещённые с `initialized=false`), per-scene позиции/направления, SCC object states и Lstate placeholders, inventory в исходном порядке с дубликатами, карту и live-позу героя. Native capacity из 50 сцен не превращается в вымышленные Level9/49/50.
+- Авторитетный источник: `SceneLoader.states` для сцен и объектов, `SceneLoader.inventory` для предметов, `SceneLoader.game.map` для bank/unlocks. Активная `SceneView` — источник актуальных координат/направления/режима героя и живых transform; `SceneDefinition` остаётся декларациями/дефолтами; `SccRuntime` не экспортируется, его local state cache не сериализуется.
+- Объектные поля snapshot: `state`, `depth`, `cursorId`, `rect`, `kind`, видимость Active/Light и эффективная видимость базового Object, image (`mult` с file/frame/slot/child, `empty` после Hide или `unassigned`) и transform `{x,y,scaleX,scaleY,anchorX,anchorY}`. Transform/видимость обновляются при применении MULT и синхронизируются перед обычной выгрузкой сцены. Level21 E2E зафиксировал Ladder `Hide` как `image=empty, visible=false`, а тень — как назначенный `K_lest` frame 12 с `visible=false`; это не выводится из State. Snapshot лишь читает live Sprite и не вызывает dispose/stop/cancel.
+- Setmap/Setzon теперь обновляют две независимые группы по семь unlock-флагов. Явный `legacy-zone-v1` экспортируется без выдумывания unlocks; обычная новая сессия использует `banked-v1` с нулевыми unlocks.
+- Исправлено объединение SCC declaration со старым состоянием: cursor, rect, transform и другие постоянные поля больше не теряются при повторном входе. Исправлен stale hero position при snapshot: активная сцена берёт координаты из live view, включая валидные `(0,0)`; неактивные используют сохранённый SceneState.
+- Следующий этап импорта ещё должен валидировать schema/content и все числовые поля до мутаций, транзакционно заменить loader state, восстановить сцену до Start, применить image/visibility/transform после SCC declarations, восстановить hero pose и вывести runtime на чистую границу. В snapshot намеренно отсутствуют Program/PC/waits, маршруты, animation elapsed/barriers, звук, UI selection, Pixi объекты/текстуры и blob URLs: оригинальный EXE их не сохраняет, а восстановление должно строить их заново. Native binary slots/header, слоты UI и неизвестные лимиты оригинала не копируются.
+- Проверки: `pnpm test` — 19 файлов / 172 теста прошли; `pnpm build` — успешно; `pnpm e2e:browser:all` — 9/9 сценариев и 47/47 сцен; `pnpm e2e:browser:lora` и standalone Level21 ladder E2E — прошли. Level21 snapshot фиксирует `Lest.image=empty, visible=false`, `Lest_ten.image=K_lest/frame12, visible=false`, `Grandmother.state=1`, `inventory=[29]`. Level38 snapshot после разговора фиксирует `Lora.state=2`, `cursorId=7`, MULT `K_talke/frame11`, inventory `[4]`.
+
 ## SCC Fault (восстановлено)
 
 - `Fault` разбирается как top-level visit-scoped список Voices; сохраняются порядок деклараций, повторы путей и first-match по имени. Некорректные записи диагностируются; единственная корпусная совместимость без `count` ограничена `Level17.scc:127` (`New_janitor1`, DERIVED), где переиспользуется предыдущее значение 1.

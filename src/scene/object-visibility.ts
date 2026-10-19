@@ -56,6 +56,7 @@ export function applyObjectVisibility(
   const changed = stored.mult !== undefined || stored.imageHidden !== true;
   stored.mult = undefined;
   stored.imageHidden = true;
+  stored.visible = false;
   return { found: true, changed, clearImage: true, kind: 'Object' };
 }
 
