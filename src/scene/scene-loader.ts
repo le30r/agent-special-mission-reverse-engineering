@@ -30,6 +30,8 @@ export type SceneObjectState = {
    * until a later MULT frame assigns an image again.
    */
   imageHidden?: boolean;
+  /** Explicit saved state distinct from the implicit layout image of a fresh visit. */
+  imageUnassigned?: boolean;
   /** Active/Light +0x297 visibility or effective base Object image visibility in the browser. */
   visible?: boolean;
   /** Hover cursor ID (+0x152), written by SCC `Cursor name value`. */
@@ -143,6 +145,7 @@ export class SceneLoader {
         object.depthProvenance = old.depthProvenance;
         object.mult = old.mult;
         object.imageHidden = old.imageHidden;
+        object.imageUnassigned = old.imageUnassigned;
         if (old.visible !== undefined) object.visible = old.visible;
       }
     }
@@ -202,6 +205,40 @@ export class SceneLoader {
       currentSceneId, scenes, inventory: this.inventory.slice(), map: cloneSavedMap(this.game.map),
       hero: live ? { ...live.hero, position: [...live.hero.position] as [number, number], ...(live.hero.transform ? { transform: cloneTransform(live.hero.transform) } : {}) } : null,
     };
+  }
+
+  /** Replaces canonical world data from a detached save DTO; no runtime or view is resumed here. */
+  restorePersistentState(snapshot: PersistentWorldSnapshot): void {
+    this.pending = undefined;
+    this.disposeRuntime();
+    this.states.clear();
+    for (const saved of snapshot.scenes) {
+      const scene = createSceneState(saved.id);
+      scene.initialized = saved.initialized;
+      scene.savedPosition = [saved.savedPosition[0], saved.savedPosition[1]];
+      scene.savedDirection = saved.savedDirection;
+      for (const item of saved.objects) {
+        const placeholder = item.placeholder === true;
+        const image = item.image;
+        const value: SceneObjectState = {
+          name: item.name, state: item.state, depth: item.depth,
+          ...(item.cursorId === undefined ? {} : { cursorId: item.cursorId }),
+          ...(item.transform ? { transform: cloneTransform(item.transform) } : {}),
+          ...(item.visible === undefined ? {} : { visible: item.visible }),
+          ...(item.rect ? { rect: cloneRect(item.rect) } : {}),
+          ...(item.kind ? { kind: item.kind } : {}),
+          ...(placeholder ? { placeholder: true } : {}),
+          ...(image.kind === 'mult' ? { mult: { ...image.reference }, imageHidden: false } : image.kind === 'empty' ? { imageHidden: true } : image.kind === 'unassigned' ? { imageUnassigned: true } : {}),
+        };
+        scene.objects.set(value.name, value);
+        if (!placeholder) scene.declarations.push(value.name);
+      }
+      this.states.set(scene.id, scene);
+    }
+    this.inventory.splice(0, this.inventory.length, ...snapshot.inventory);
+    this.game.map = cloneSavedMap(snapshot.map);
+    this.game.zone = snapshot.map.model === 'legacy-zone-v1' ? snapshot.map.zone : this.game.zone;
+    this.active = this.states.get(snapshot.currentSceneId ?? -1);
   }
   schedule(scene: number, portal: number): void { this.pending = { scene,portal }; }
   /**

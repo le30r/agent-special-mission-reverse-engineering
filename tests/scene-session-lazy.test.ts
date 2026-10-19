@@ -18,9 +18,16 @@ function deferredProvider(ids: number[]): TestProvider {
   const released: Array<{ id: number; scene: LoadedScene }> = [];
   return {
     ids,
+    contentId: 'test-content',
     pending,
     released,
     has: (id) => ids.includes(id),
+    fork: () => ({
+      ids,
+      contentId: 'test-content',
+      has: (id: number) => ids.includes(id),
+      load: async (id: number) => { throw new Error(`candidate resources unavailable for ${id}`); },
+    }),
     load(id) {
       let resolve!: (scene: LoadedScene) => void;
       let reject!: (error: Error) => void;
@@ -42,6 +49,7 @@ function fakeViewFactory(order: string[]) {
       selectedItem: 0,
       animationLog: [] as string[],
       disposed: false,
+      blockReason: undefined as string | undefined,
       initRuns: 0,
       startRuns: 0,
       id: definition.id,
@@ -52,6 +60,8 @@ function fakeViewFactory(order: string[]) {
       selectItem: () => {},
       pointerDown: () => {},
       tick: () => {},
+      inTick: false,
+      saveBlockReason: () => view.blockReason,
       status: () => ({ scene: definition.id, position: [0, 0], direction: 6, depth: 0, scale: 1, scroll: 0, objects: 0, inventory: [], selectedItem: 0, active: {} }),
       objectDebug: () => undefined,
       depthReport: () => '',
@@ -88,6 +98,20 @@ async function setup() {
 }
 
 describe('lazy scene loading and release', () => {
+  it('offers Save only at a post-tick boundary and denies pending transitions or unsafe views', async () => {
+    const {session,provider,scene1}=await setup();
+    session.request(1,-1,'boot'); session.flush();
+    provider.pending.get(1)!.resolve(scene1); await tick(); session.flush();
+    expect(session.canSave()).toMatchObject({ok:false,code:'Busy'});
+    session.markPostTick();
+    expect(session.canSave()).toEqual({ok:true});
+    (session.view as unknown as {blockReason?:string}).blockReason='hero is moving';
+    expect(session.canSave()).toMatchObject({ok:false,code:'Busy',reason:'hero is moving'});
+    (session.view as unknown as {blockReason?:string}).blockReason=undefined;
+    session.request(39,0);
+    expect(session.canSave()).toMatchObject({ok:false,code:'TransitionInProgress'});
+  });
+
   it('keeps the old scene until the requested scene resources have loaded', async () => {
     const { session, provider, order, scene1, scene39 } = await setup();
     session.request(1, -1, 'boot');
@@ -154,6 +178,39 @@ describe('lazy scene loading and release', () => {
     expect(session.view?.definition.id).toBe(1);
     expect(session.loadError).toMatchObject({ scene: 39, message: 'missing MULT' });
     expect(errors).toEqual([{ scene: 39, message: 'missing MULT' }]);
+  });
+
+  it('keeps the current session intact when candidate resources fail during import', async () => {
+    const { session, provider, scene1 } = await setup();
+    session.request(1, -1);
+    session.flush();
+    provider.pending.get(1)!.resolve(scene1);
+    await tick();
+    session.flush();
+    const oldView = session.view;
+    const oldLoader = session.loader;
+    const save = {
+      format: 'agent-revers.game-save' as const,
+      schemaVersion: 1 as const,
+      contentId: 'test-content',
+      createdAt: new Date().toISOString(),
+      label: 'resource failure',
+      world: {
+        activeLevel: 1,
+        currentSceneId: 1,
+        scenes: [{ id: 1, initialized: true, savedPosition: [0, 0] as [number, number], savedDirection: 6, objects: [] }],
+        inventory: [],
+        map: { model: 'legacy-zone-v1' as const, zone: 0 },
+        hero: null,
+      },
+    };
+
+    const result = await session.importSave(save);
+
+    expect(result).toMatchObject({ ok: false, error: { code: 'ResourceLoadFailed' } });
+    expect(session.view).toBe(oldView);
+    expect(session.loader).toBe(oldLoader);
+    expect(session.isRestoring).toBe(false);
   });
 
   it('ignores a superseded load instead of switching to it', async () => {

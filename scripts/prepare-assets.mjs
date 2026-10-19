@@ -14,6 +14,7 @@
 import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { discoverSceneDependencies, normalizeOriginalPath } from '../src/scene/scene-discovery.ts';
@@ -263,8 +264,28 @@ for (const scene of discovery.scenes) {
 
 const loadable = scenes.filter((scene) => scene.loadable).map((scene) => scene.id);
 const incomplete = scenes.filter((scene) => !scene.loadable).map((scene) => ({ id: scene.id, reasons: scene.missing.required.map((entry) => entry.message) }));
+// Save compatibility follows actual SCC/resource semantics, not generated URLs or timestamps.
+const semanticFiles = new Map();
+for (const scene of discovery.scenes) {
+  semanticFiles.set(path.join(scripts, scene.sccFileName), `scripts/${scene.sccFileName}`);
+  for (const include of scene.includes) semanticFiles.set(path.join(scripts, include.sourcePath), `scripts/${include.sourcePath}`);
+  for (const resource of [scene.background, scene.mask, ...scene.masks, ...scene.animations, ...scene.externalImages]) {
+    if (resource?.sourcePath) semanticFiles.set(path.join(source, resource.sourcePath), `resources/${resource.sourcePath}`);
+  }
+}
+for (const relative of ['block1/Xsh/Base', 'block0/XSH/Interface']) {
+  for (const file of await walk(path.join(source, relative))) semanticFiles.set(file, `resources/${path.relative(source,file).split(path.sep).join('/')}`);
+}
+const contentDigest=createHash('sha256');
+for (const [file,semanticPath] of [...semanticFiles].sort((a,b)=>a[1].toLowerCase().localeCompare(b[1].toLowerCase()))) {
+  contentDigest.update(semanticPath.toLowerCase()); contentDigest.update('\0');
+  try { contentDigest.update(await readFile(file)); } catch { contentDigest.update('<missing>'); }
+  contentDigest.update('\0');
+}
+const contentId=`sha256:${contentDigest.digest('hex')}`;
 const manifest = {
   version: 2,
+  contentId,
   generator: 'scripts/prepare-assets.mjs',
   audioResources,
   audioDurations,

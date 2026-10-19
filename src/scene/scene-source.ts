@@ -14,6 +14,7 @@ import {
   releaseMultTextures,
 } from './textures';
 import type { LoadedScene, SceneProvider } from './scene-session';
+import { saveContentHash } from './save-codec';
 
 export { decodeMask };
 
@@ -52,6 +53,8 @@ export type SceneManifestEntry = {
 
 export type SceneManifest = {
   version: number;
+  /** SHA-256 of normalized original SCC and persistent-state-relevant resource bytes. */
+  contentId?: string;
   generator?: string;
   summary: {
     total: number;
@@ -221,6 +224,7 @@ export class SceneAssetProvider implements SceneProvider {
   readonly manifest: SceneManifest;
   readonly reader: SceneResourceReader;
   readonly ids: number[];
+  readonly contentId: string;
   private readonly byId: Map<number, SceneManifestEntry>;
   private readonly loaded = new Map<number, { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrl: string }>();
 
@@ -229,7 +233,11 @@ export class SceneAssetProvider implements SceneProvider {
     this.reader = reader;
     this.byId = new Map(manifest.scenes.map((scene) => [scene.id, scene]));
     this.ids = [...this.byId.keys()].sort((a, b) => a - b);
+    this.contentId = manifest.contentId ?? saveContentHash(JSON.stringify({ version:manifest.version, scenes:manifest.scenes }));
   }
+
+  /** A detached cache namespace is required for transactional same-scene restore. */
+  fork(): SceneProvider { return new SceneAssetProvider(this.manifest, this.reader); }
 
   has(id: number): boolean { return this.byId.has(id); }
   /** Number of scene resource sets currently retained (should be 0 or 1). */

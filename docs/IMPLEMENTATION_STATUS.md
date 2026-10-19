@@ -203,3 +203,19 @@ pnpm catalog:report
 3. Покрыть остальные `Show`/`Hide`-ветки корпуса (включая `Hide Mainhero`/`Light`) и camera scroll на нескольких ручных маршрутах.
 4. Уточнить UI-события и Cursor rendering; загрузчик уже покрывает все 47 сцен.
 5. Проверить полные сюжетные маршруты в сценах 41–48, где сейчас подтверждены только загрузка/вход.
+
+## Save/Load Core — feature/save-load-core
+
+**Срез:** 2026-10-19. Реализован программный Save/Load Core поверх Persistent State Foundation; UI, слоты и браузерное хранилище по-прежнему вне scope.
+
+- `SaveCodec` сериализует `GameSaveV1` в canonical JSON и envelope с SHA-256 UTF-8 digest. DTO использует `PersistentWorldSnapshot`, сохраняет порядок/дубликаты inventory, scene/object order, placeholder/Lstate, image `empty/unassigned/mult`, cursor/depth/transform/visibility, карту и hero mode. Digest — целостность, не аутентификация.
+- Валидатор проверяет формат/версию/contentId, размер payload 2 MiB, active Level, уникальные сцены и SCC identities, State/item/map bounds, finite transforms/coordinates, placeholder rules и точную MULT-цепочку. `SceneAssetProvider` contentId считается от нормализованных путей и байтов SCC/MULT/mask/background/shared assets; семантическое изменение контента несовместимо.
+- `SceneSession.canSave()` — read-only gate после post-tick: запрещает отсутствие активной сцены, pending/pendingLoad/transition, активный SCC Program, movement, конечную one-shot анимацию, media barrier, временный Block mode, restore и открытый/pending inventory selection. Ambient loops не блокируют Save.
+- Import сначала валидирует вход, создаёт новый `SceneLoader` и isolated provider, грузит/проверяет сохранённые MULT references всех посещённых сцен, собирает detached active `SceneView` и восстанавливает world до dispatch. Только затем атомарно подменяет loader/view/provider, инвалидирует pending load, dispose-ит старую сцену и освобождает старые ресурсы. Ошибка подготовки оставляет старую сессию нетронутой.
+- Restore не сериализует Program/PC, animation clocks, Fclick/audio handles или route. Посещённый active Level не получает Init повторно; Mainhero навигационной сцены получает Stop0 с mask correction/depth/scale/camera, затем обычный Start ровно один раз. Сохранённые object visuals назначаются без Fram/Sound/Fclick callbacks; эффекты нового Start остаются авторитетными. Same-scene Load принудительно строит отдельный candidate visit.
+- Resource ownership защищён forked `SceneAssetProvider`: candidate загружает независимые scene definitions/MULT textures, background/external textures используют ref counts; old provider освобождается только после swap. Старые асинхронные callbacks захватывают provider своего поколения, а restore блокирует flush/input до commit.
+- Debug hook `window.__saveLoadDebug` доступен с `?debug=save` или `?debug=scenes`; добавлен Chromium Save/Load Core E2E с настоящим SCC pickup, несовместимым импортом без побочного эффекта, rollback same-scene и повторным gameplay pickup.
+
+**Проверки текущего среза:** `pnpm build`; `pnpm test` — 20 файлов / 178 тестов; `pnpm e2e:browser:all` — 9/9; Save/Load Core same-scene E2E; standalone Level21 ladder и Lora E2E; каталог 47/47. Отдельный unit-тест подтверждает, что ошибка загрузки ресурсов candidate при import оставляет прежние `view` и `loader` активными.
+
+**Ограничения:** нет UI/localStorage/slot repository; browser policy намеренно строже оригинала; нет импорта оригинального `.sav`; runtime-ошибка нового Start после commit возвращается как `RestoreFailed` и не откатывает уже committed session; profile legacy-zone сохраняет только реально имеющуюся модель и не выдумывает banked unlocks.

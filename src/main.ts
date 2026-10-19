@@ -109,6 +109,7 @@ async function main() {
   const parameters = new URLSearchParams(location.search);
   const depthDebug = parameters.get('debug') === 'depth';
   const sceneDebug = parameters.get('debug') === 'scenes';
+  const saveDebug = parameters.get('debug') === 'save' || sceneDebug;
 
   const app = new Application();
   await app.init({ width: VIEWPORT_WIDTH, height: VIEWPORT_HEIGHT, background: 0x000000, antialias: false, autoDensity: true, resolution: window.devicePixelRatio || 1 });
@@ -142,6 +143,8 @@ async function main() {
   overlay.addChild(inventoryView.root);
   const session = new SceneSession(stageRoot, provider, {
     audioBackend,
+    saveUiBusy: () => inventoryView.open || inventoryView.pendingSelection !== 0,
+    onRestoreCommit: (items) => { inventoryView.resetForRestore(); inventoryView.setItems(items); },
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
@@ -152,6 +155,14 @@ async function main() {
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
     debugWindow.__sccDebug = { session, view: () => session.view };
     debugWindow.__inventoryDebug = { view: () => ({ open: inventoryView.open, pendingSelection: inventoryView.pendingSelection }) };
+  }
+  if (saveDebug) {
+    const debugWindow = window as Window & { __saveLoadDebug?: unknown };
+    debugWindow.__saveLoadDebug = {
+      canSave: () => session.canSave(),
+      exportSave: (label = 'E2E') => session.exportSave(label),
+      importSave: (save: Parameters<typeof session.importSave>[0]) => session.importSave(save),
+    };
   }
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
@@ -171,6 +182,7 @@ async function main() {
     inventoryView.setItems(session.loader.inventory);
     debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
+    if (view) session.markPostTick();
     if (depthPanel) depthPanel.textContent = view?.depthReport() ?? 'DEPTH DEBUG · no active scene';
     if (animationPanel) {
       animationPanel.textContent = view
@@ -190,7 +202,7 @@ async function main() {
     // Unlock Web Audio from the user's gesture before SCC click handling.
     if (audioBackend) void audioBackend.resume().catch((error) => console.warn('Audio unlock failed', error));
     const view = session.view;
-    if (!view) return;
+    if (!view || session.isRestoring) return;
     if (audioBackend) void view.unlockAudio().catch((error) => console.warn('Audio unlock failed', error));
     const [x, y] = screenPosition(app, event);
     // The inventory is a normal overlay. Its pending choice becomes scene+5
