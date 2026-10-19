@@ -263,7 +263,7 @@ export class SccRuntime {
   private run(state: ProgramState): void {
     while (state.active) {
       const command = state.program.commands[state.pc];
-      if (!command) { state.active = false; state.waiting = false; this.busy = false; return; }
+      if (!command) { state.active = false; state.waiting = false; return; }
       if (command.op === 'Goto') {
         if (!state.waiting) {
           const hasPath = this.goto(command.x, command.y);

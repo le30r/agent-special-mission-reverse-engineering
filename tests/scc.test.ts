@@ -166,6 +166,46 @@ describe('cooperative SCC runtime', () => {
     expect(runtime.programs[0].active).toBe(false);
   });
 
+  it('keeps StartW busy while a later concurrent Start Program finishes', () => {
+    const source = `Click 0 Start Interface
+{
+ Case 0
+  StartW A
+  State checkpoint 1
+ Break
+}
+Click 0 Start Vent
+{
+ Case 0
+  Start ambient
+ Break
+}`;
+    let animationAActive = false;
+    const started: string[] = [];
+    const runtime = new SccRuntime(source, {
+      pathActive: () => false,
+      animationActive: (name) => name === 'A' && animationAActive,
+      startAnimation: (name) => { started.push(name); if (name === 'A') animationAActive = true; },
+      setPosition: () => {}, setDepth: () => {},
+    });
+
+    runtime.dispatch('Start');
+
+    expect(started).toEqual(['A', 'ambient']);
+    expect(runtime.programs).toHaveLength(2);
+    expect(runtime.programs[0]).toMatchObject({ active: true, waiting: true, pc: 0 });
+    expect(runtime.programs[1]).toMatchObject({ active: false, waiting: false });
+    expect(runtime.states.get('checkpoint')).toBeUndefined();
+    expect(runtime.busy).toBe(true);
+
+    animationAActive = false;
+    runtime.tick();
+
+    expect(runtime.states.get('checkpoint')).toBe(1);
+    expect(runtime.programs[0].active).toBe(false);
+    expect(runtime.busy).toBe(false);
+  });
+
   it('adjacent Case labels share one Program and Break starts the next list', () => {
     const source='Click 0 Demo Demo\n{\n Case 0\n Case 1\n  Addtol 1\n Break\n Case 2\n  Addtol 2\n Break\n}';
     const handler=parseScc(source)[0];
