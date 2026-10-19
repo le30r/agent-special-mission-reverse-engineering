@@ -233,3 +233,14 @@ pnpm catalog:report
 **Проверки UI-среза:** `pnpm test` — 21 файл / 182 теста; `pnpm build`; Chromium UI roundtrip `pnpm e2e:browser:save-load-ui` — реальный canvas pickup → F2/write → hard reload → F3/restore, UI JSON export action → очищенные слоты → file picker/preview/confirmed import без создания слотов; Save/Load Core E2E; Level21 ladder → F2/save → hard reload → F3/load с item 29, скрытыми лестницей/тенью, Grandmother state и без повторного Init; `pnpm e2e:browser:all` — 9/9, включая каталог 47/47; `pnpm e2e:browser:lora` — passed. `Level44 To_38` не изменялся.
 
 **Ограничения:** localStorage не даёт атомарного compare-and-swap: версия проверяется непосредственно перед единичным `setItem`, но между проверкой и записью остаётся узкое окно гонки. Устройства/профили, очистившие данные origin, сохраняют переносимость через JSON export; старые JSON могут быть отклонены при изменении `contentId` или schema. Проверка `localStorage` ограничена текущим browser origin/profile.
+
+## Hitbox Debugger — feature/hitbox-debugger
+
+В отдельном worktree от локального актуального `master` добавлен `?debug=hitbox` и переключатель в существующей Debug Panel. SceneView предоставляет read-only hit-test snapshot и click trace, используя текущие `activeHitTest`, `hitTest`, порядок `firstHitTarget` и реальные маски alpha; отладчик не подменяет и не меняет dispatch.
+
+- Object opaque pixels рисуются зелёным; overlapping hit candidates под курсором — жёлтым; Active — полупрозрачными синими прямоугольниками; скрытые объекты/Active — красной диагностикой. Graphics overlay имеет `eventMode=none`; слой наследует сценовый scroll, а координаты курсора нормализуются через размер canvas.
+- Inspector показывает SCC identity/state, depth/cursor/visibility/MULT, наличие Click handlers, состояние state-object/совпадение Case, hit/miss причину. Click trace включает screen/world, отсортированные Object-кандидаты, выбранную цель или ранний SCC-busy gate, handler/Case и факт dispatch/reject.
+- Реальный Level3 Chromium E2E находит пиксель Stool, подтверждает `Interface.state=0` при наличии только `Case 1`, а затем фиксирует отказ `Case 0`; hover не меняет SCC state/program count. Это диагностический вывод, исправления Level3/SCC/MULT не вносились.
+- Unit: `pnpm test` — 184/184; production `pnpm build`; `pnpm e2e:browser:hitbox` — passed. Corpus verification JSON и оригинальные игровые assets в worktree подключались read-only symlink из основного checkout.
+
+**Ограничение:** overlay показывает области согласно текущему browser hit-test (Object alpha, Active rect) и известной runtime-геометрии; это не реконструкция native compositor, `Light` и неизвестных нативных перекрытий.
