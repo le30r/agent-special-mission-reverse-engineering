@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Hitbox inspector: real Level3 stool, hover purity, overlap ordering and scroll mapping. */
 const cdp = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const url = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=hitbox';

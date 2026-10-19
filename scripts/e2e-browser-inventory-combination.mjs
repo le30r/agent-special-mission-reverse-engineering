@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /**
  * Chromium E2E: collect the original Level1 crowbar and Level38 knife, combine
  * them through the inventory UI, and use item 39 on Lora's door.
@@ -17,7 +18,7 @@ import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
-const screenshotDir = process.env.E2E_SCREENSHOT_DIR ?? path.join('research', 'inventory', 'evidence', 'browser-combination');
+const screenshotDir = process.env.E2E_SCREENSHOT_DIR ?? resources.tempDir('artifacts');
 const logicalWidth = 800;
 const logicalHeight = 600;
 

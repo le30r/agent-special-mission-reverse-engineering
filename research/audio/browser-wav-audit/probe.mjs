@@ -1,6 +1,11 @@
+import { resources } from '../../../scripts/lib/e2e-resources.mjs';
+import path from 'node:path';
+import { mkdir } from 'node:fs/promises';
+const output = process.env.E2E_OUTPUT_DIR ?? resources.tempDir('artifacts');
+await mkdir(output, { recursive: true });
 /** Research-only diagnostic harness. Use a dedicated Chromium CDP endpoint on 9333.
  * Run: node research/audio/browser-wav-audit/probe.mjs <init|lifecycle|graph|runtime|scheduler|repeat> fresh
- * Requires current Vite on 4173. Results are written to /private/tmp/wav-audit.
+ * Requires current Vite on 4173. Set E2E_OUTPUT_DIR to retain results; defaults are disposable.
  * Not imported by the application or the test suite.
  */
 import { writeFile } from 'node:fs/promises';
@@ -47,7 +52,7 @@ if(mode==='graph') {
  results.push({phase:'after-e2e-disconnect-current-document',...(await measure())});
  await send('Page.reload');await wait(1500);
  results.push({phase:'after-e2e-disconnect-reload',...(await measure())});
- await writeFile('/private/tmp/wav-audit/graph.json',JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));
+ await writeFile(path.join(output, 'graph.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results,null,2));
 }
 if(mode==='runtime') {
  const result=await ev(`(async()=>{
@@ -66,7 +71,7 @@ if(mode==='runtime') {
  const audio2=new SccAudioRuntime(backend2,{'sound/test.wav':'/test.wav'},1,false,{'sound/test.wav':1000});
  const coldHandle=audio2.play(hook,100);const cold={ready:audio2.isReady(1,1101),state:coldHandle.state};
  audio2.dispose();release({ok:true,status:200,arrayBuffer:async()=>new ArrayBuffer(1)});await new Promise(r=>setTimeout(r,30));cold.afterDispose={state:coldHandle.state,active:backend2.activePlaybackCount,trace:backend2.diagnostics()};await backend2.dispose();
- return {locked,cold};})()`);await writeFile('/private/tmp/wav-audit/runtime.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+ return {locked,cold};})()`);await writeFile(path.join(output, 'runtime.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }
 if(mode==='lifecycle') {
  await send('Page.navigate',{url:'http://127.0.0.1:4173/?debug=scenes'});await wait(2000);
@@ -83,7 +88,7 @@ if(mode==='lifecycle') {
  results.push({phase:'before-scene-switch',...(await snapshot())});
  await ev(`document.querySelector('#debug-scene-38').click()`);await wait(2000);
  results.push({phase:'after-scene-switch',...(await snapshot()),oldAudio:await ev(`({disposed:window.__oldAudio.disposed,voices:window.__oldAudio.snapshot()})`)});
- await writeFile('/private/tmp/wav-audit/lifecycle.json',JSON.stringify(results,null,2));console.log(JSON.stringify(results.map(({trace,panel,voices,...r})=>({...r,voices})),null,2));
+ await writeFile(path.join(output, 'lifecycle.json'),JSON.stringify(results,null,2));console.log(JSON.stringify(results.map(({trace,panel,voices,...r})=>({...r,voices})),null,2));
 }
 if(mode==='inspect')console.log(JSON.stringify(await ev(`({url:location.href,muted:window.__e2eAudioMuted,count:window.__e2eAudioMuteCount,connect:String(AudioBufferSourceNode.prototype.connect),panel:document.querySelector('.scene-debug')?.textContent,trace:window.__audioDebug?.view()?.audio?.diagnostics()})`),null,2));
 if(mode==='scheduler') {
@@ -104,12 +109,12 @@ if(mode==='scheduler') {
  const first=audio.play(event,0);const second=audio.play(event,1);await new Promise(r=>setTimeout(r,10));
  const replay={activeBefore:backend.activePlaybackCount,first:first.state,second:second.state};audio.stop(1);replay.activeAfter=backend.activePlaybackCount;replay.firstAfter=first.state;replay.secondAfter=second.state;
  audio.dispose();
- return {skipped,replay};})()`);await writeFile('/private/tmp/wav-audit/scheduler.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+ return {skipped,replay};})()`);await writeFile(path.join(output, 'scheduler.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }
 if(mode==='repeat') {
  const result=await ev(`(async()=>{
  const {parseFrameSoundEvents}=await import('/src/audio/scc-audio.ts');const files=['Level3','Level28','Level31','Level36'];const corpus=[];
  for(const name of files){const text=await(await fetch('/resources/'+name+'.scc')).text();const events=parseFrameSoundEvents(text);corpus.push({name,inlineDeclarations:text.split(/\\r?\\n/).filter(l=>/\\bRepeat\\b/i.test(l)),parsedRepeats:events.filter(e=>e.repeat),relevantEvents:events.filter(e=>['Ventc','Watc','More_c','Dog1_c','Dog2_c','Fire_Start'].includes(e.animation))});}
- return {corpus,inline:parseFrameSoundEvents('Sound Test\\nFram 1 0 1 Object sound/test.wav Repeat'),separate:parseFrameSoundEvents('Sound Test\\nFram 1 0 1 Object sound/test.wav\\nRepeat')};})()`);await writeFile('/private/tmp/wav-audit/repeat.json',JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
+ return {corpus,inline:parseFrameSoundEvents('Sound Test\\nFram 1 0 1 Object sound/test.wav Repeat'),separate:parseFrameSoundEvents('Sound Test\\nFram 1 0 1 Object sound/test.wav\\nRepeat')};})()`);await writeFile(path.join(output, 'repeat.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result,null,2));
 }
 c.ws.close();

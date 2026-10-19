@@ -3,8 +3,7 @@
 
 Read-only analysis of the original `Scripts/*.scc` files. This script does not
 modify any game resource and does not run Ghidra. It prints a compact report and
-optionally writes a machine-readable JSON to a caller-supplied path (by default
-/tmp, never into Git).
+optionally writes a machine-readable JSON to a caller-supplied path (only when explicitly requested).
 
 Grammar model (from SCC_RUNTIME.md / SCENE_TRANSITIONS.md and direct inspection):
   * a line with NO leading whitespace is a TOP-LEVEL statement;
@@ -161,7 +160,7 @@ def analyze(path):
 
 
 def main():
-    out_path = sys.argv[1] if len(sys.argv) > 1 else "/tmp/scc_audit.json"
+    out_path = sys.argv[1] if len(sys.argv) > 1 else None
     level_files = sorted(
         [f for f in os.listdir(SCRIPTS) if LEVEL_RE.match(f)],
         key=lambda f: int(LEVEL_RE.match(f).group(1)),
@@ -199,9 +198,10 @@ def main():
         "levels": {str(k): v for k, v in levels.items()},
         "others": others,
     }
-    with open(out_path, "w", encoding="utf-8") as fh:
-        json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)
-    print(f"Wrote {out_path}")
+    if out_path is not None:
+        with open(out_path, "w", encoding="utf-8") as fh:
+            json.dump(report, fh, ensure_ascii=False, indent=2, sort_keys=True)
+        print(f"Wrote {out_path}")
 
     print("\n===== TOP-LEVEL FREQUENCY (all files) =====")
     for k in sorted(top_all, key=lambda x: -top_all[x]):

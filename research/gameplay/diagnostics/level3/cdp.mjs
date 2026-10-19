@@ -1,3 +1,4 @@
+import '../../../../scripts/lib/e2e-resources.mjs';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 const targets = await (await fetch((process.env.E2E_CDP ?? 'http://127.0.0.1:9383') + '/json')).json();
 const ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);

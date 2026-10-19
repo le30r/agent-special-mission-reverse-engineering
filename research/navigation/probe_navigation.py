@@ -10,11 +10,21 @@ from pathlib import Path
 import hashlib
 import json
 import math
+import os
+import time
 import shutil
+import signal
 import struct
 import subprocess
 import sys
 import tempfile
+
+def _terminate(signum, frame):
+    # Raise through subprocess.run and TemporaryDirectory so both unwind normally.
+    raise SystemExit(128 + signum)
+
+
+signal.signal(signal.SIGTERM, _terminate)
 
 ROOT = Path(__file__).resolve().parents[2]
 OUT = Path(__file__).resolve().parent
@@ -48,9 +58,15 @@ def decode_tiff(path):
     tool = shutil.which('tiffcp')
     if not tool:
         raise RuntimeError('Install libtiff (tiffcp required) before running this probe')
-    with tempfile.TemporaryDirectory(prefix='agent-navigation-') as temp:
+    owner = hashlib.sha256(str(ROOT.resolve()).encode()).hexdigest()[:16]
+    temporary_root = Path(tempfile.gettempdir()) / f'agent-revers-tests-{owner}'
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix='navigation-', dir=temporary_root) as temp:
+        (Path(temp) / 'owner.json').write_text(json.dumps({
+            'owner': owner, 'pid': os.getpid(), 'created': time.time() * 1000, 'groups': []
+        }))
         target = Path(temp) / 'decoded.tif'
-        subprocess.run([tool, '-c', 'none', '-r', '600', str(path), str(target)], check=True)
+        subprocess.run([tool, '-c', 'none', '-r', '600', str(path), str(target)], check=True, timeout=60)
         data = target.read_bytes()
     tags = tiff_tags(data)
     assert tags[258] == [8] and tags[277] == [1] and tags[259] == [1]

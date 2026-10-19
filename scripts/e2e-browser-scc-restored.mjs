@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Real Chromium integration checks for SCC stateScene, Fclick/Block and Setmsk. */
 import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Real-browser Level21 ladder rendering, pickup, and scene re-entry regression. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:5177/?debug=scenes&audio=silent';
-const outputDir = process.env.E2E_OUTPUT_DIR ?? path.join('research', 'gameplay', 'evidence', 'level21-ladder');
+const outputDir = process.env.E2E_OUTPUT_DIR ?? resources.tempDir('artifacts');
 const targets = await (await fetch(`${cdpEndpoint}/json`)).json();
 const page = targets.find((target) => target.type === 'page' && target.url.includes('127.0.0.1'))
   ?? targets.find((target) => target.type === 'page');

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /**
  * Loads every scene discovered by scripts/prepare-assets.mjs through the real
  * browser SceneAssetProvider and records whether the lazy loader can enter it.
@@ -18,7 +19,7 @@ import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
-const outputDir = process.env.E2E_OUTPUT_DIR ?? path.join('research', 'transitions', 'evidence', 'scene-catalog');
+const outputDir = process.env.E2E_OUTPUT_DIR ?? resources.tempDir('artifacts');
 
 const targets = await (await fetch(`${cdpEndpoint}/json`)).json();
 const page = targets.find((target) => target.type === 'page' && target.url.includes('127.0.0.1'))

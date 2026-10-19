@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /**
  * Real-Chromium regression for the Level39 column painter order.
  *
@@ -16,7 +17,7 @@ import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=depth';
-const evidenceDir = process.env.E2E_EVIDENCE_DIR ?? path.join('research', 'rendering', 'evidence', 'columns');
+const evidenceDir = process.env.E2E_EVIDENCE_DIR ?? resources.tempDir('artifacts');
 const logicalWidth = 800;
 const logicalHeight = 600;
 

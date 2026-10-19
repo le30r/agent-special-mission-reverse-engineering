@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Level3 StartW concurrency, real pickups, old-save restore, and portal re-entry. */
 import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 const cdp=(process.env.E2E_CDP??'http://127.0.0.1:9222').replace(/\/$/,'');

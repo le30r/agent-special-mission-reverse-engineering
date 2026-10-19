@@ -1,46 +1,41 @@
 #!/usr/bin/env node
 /** Starts an isolated Vite + headless Chromium pair, then runs every Chromium E2E. */
-import { spawn } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
-import os from 'node:os';
+import { resources } from './lib/e2e-resources.mjs';
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const root = process.cwd();
 const chrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const port = Number(process.env.E2E_DEV_PORT ?? 5197);
-const cdpPort = Number(process.env.E2E_CDP_PORT ?? 9397);
-const baseUrl = `http://127.0.0.1:${port}/?debug=scenes`;
-const children = [];
+let port = Number(process.env.E2E_DEV_PORT ?? 0);
+let cdpPort = Number(process.env.E2E_CDP_PORT ?? 0);
+let baseUrl;
 let chromeChild;
 let activeProfile;
 function start(command, args, options = {}) {
-  const child = spawn(command, args, { cwd: root, stdio: 'inherit', ...options });
-  children.push(child);
+  const child = resources.spawn(command, args, { cwd: root, stdio: 'inherit', ...options });
   return child;
 }
 async function waitFor(url, name) {
   const until = Date.now() + 90000;
   while (Date.now() < until) {
-    try { const response = await fetch(url); if (response.ok) return await response.json().catch(() => true); } catch {}
+    try { const response = await fetch(url, { signal: AbortSignal.timeout(2000) }); if (response.ok) return await response.json().catch(() => true); } catch {}
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
   throw new Error(`${name} did not become ready`);
 }
-function runE2e(script, pageUrl) {
+function runE2e(script, pageUrl, artifacts) {
   return new Promise((resolve, reject) => {
     const child = start(process.execPath, [path.join(root, 'scripts', script)], {
-      env: { ...process.env, E2E_CDP: `http://127.0.0.1:${cdpPort}`, E2E_URL: pageUrl },
+      env: { ...process.env, E2E_CDP: `http://127.0.0.1:${cdpPort}`, E2E_URL: pageUrl, E2E_TEMP_PARENT: artifacts,
+        E2E_OUTPUT_DIR: process.env.E2E_OUTPUT_DIR ?? path.join(artifacts, 'output'),
+        E2E_SCREENSHOT_DIR: process.env.E2E_SCREENSHOT_DIR ?? path.join(artifacts, 'screens'),
+        E2E_EVIDENCE_DIR: process.env.E2E_EVIDENCE_DIR ?? path.join(artifacts, 'evidence') },
     });
     child.once('error', reject);
     child.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`${script} exited ${code}`)));
   });
 }
-async function stop(child) {
-  if (!child || child.exitCode !== null) return;
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  child.kill('SIGTERM');
-  await Promise.race([exited, new Promise((resolve) => setTimeout(resolve, 5000))]);
-}
+const stop = child => child ? resources.stop(child) : Promise.resolve();
 
 try {
   const prepare = start('pnpm', ['prepare:assets']);
@@ -48,10 +43,31 @@ try {
     prepare.once('error', reject);
     prepare.once('exit', resolve);
   });
-  const prepareIndex = children.indexOf(prepare);
-  if (prepareIndex >= 0) children.splice(prepareIndex, 1);
   if (prepareCode !== 0) throw new Error(`pnpm prepare:assets exited ${prepareCode}`);
-  start(process.execPath, [path.join(root, 'node_modules/vite/bin/vite.js'), '--host', '127.0.0.1', '--port', String(port), '--strictPort']);
+  // Let the OS allocate Vite's port without a reserve/release race between runners.
+  const vite = start(process.execPath, ['--input-type=module', '-e', `
+    import { createServer } from 'vite';
+    const server = await createServer({ server: { host: '127.0.0.1', port: ${port}, strictPort: true } });
+    await new Promise((resolve, reject) => {
+      server.httpServer.once('error', reject);
+      server.httpServer.listen(${port}, '127.0.0.1', resolve);
+    });
+    console.log('E2E_VITE_PORT=' + server.httpServer.address().port);
+  `], { stdio: ['ignore', 'pipe', 'inherit'] });
+  port = await new Promise((resolve, reject) => {
+    let output = '';
+    const timer = setTimeout(() => reject(new Error('Vite startup timeout')), 90000);
+    const fail = error => { clearTimeout(timer); reject(error); };
+    vite.once('error', fail);
+    vite.once('exit', code => fail(new Error(`Vite exited ${code}`)));
+    vite.stdout.on('data', data => {
+      process.stdout.write(data);
+      output += data;
+      const match = output.match(/E2E_VITE_PORT=(\d+)/);
+      if (match) { clearTimeout(timer); resolve(Number(match[1])); }
+    });
+  });
+  baseUrl = `http://127.0.0.1:${port}/?debug=scenes`;
   await waitFor(`${baseUrl}`, 'Vite');
   const suite = [
     'e2e-browser-transition.mjs',
@@ -72,25 +88,31 @@ try {
   const scripts = startAt && from < 0 ? [startAt] : suite.slice(from);
   for (const script of scripts) {
     console.log(`\n===== Chromium E2E: ${script} =====`);
-    activeProfile = await mkdtemp(path.join(os.tmpdir(), 'agent-revers-chromium-'));
+    activeProfile = resources.tempDir('chromium');
+    const artifacts = resources.tempDir('artifacts');
+    const browserPort = process.env.E2E_CDP_PORT ? cdpPort : 0;
     chromeChild = start(chrome, [
       '--headless=new', '--no-sandbox', '--disable-gpu', '--autoplay-policy=no-user-gesture-required',
-      `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*', `--user-data-dir=${activeProfile}`, 'about:blank',
+      `--remote-debugging-port=${browserPort}`, '--remote-allow-origins=*', `--user-data-dir=${activeProfile}`, 'about:blank',
     ], { stdio: 'ignore' });
+    if (!browserPort) {
+      const until = Date.now() + 30000;
+      while (true) {
+        try { cdpPort = Number((await readFile(path.join(activeProfile, 'DevToolsActivePort'), 'utf8')).split('\n')[0]); break; }
+        catch { if (Date.now() > until || chromeChild.exitCode !== null || !chromeChild.pid) throw new Error('Chromium did not start'); await new Promise(resolve => setTimeout(resolve, 100)); }
+      }
+    }
     await waitFor(`http://127.0.0.1:${cdpPort}/json/version`, 'Chromium CDP');
     const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : script === 'e2e-browser-hitbox.mjs' ? `http://127.0.0.1:${port}/?debug=hitbox` : baseUrl;
-    await runE2e(script, pageUrl);
+    await runE2e(script, pageUrl, artifacts);
     const finishedChrome = chromeChild;
     await stop(finishedChrome);
     chromeChild = undefined;
-    const chromeIndex = children.indexOf(finishedChrome);
-    if (chromeIndex >= 0) children.splice(chromeIndex, 1);
-    await rm(activeProfile, { recursive: true, force: true });
+    await resources.remove(activeProfile);
+    await resources.remove(artifacts);
     activeProfile = undefined;
   }
   console.log(`\nAll ${scripts.length} Chromium E2E scripts passed.`);
 } finally {
-  await stop(chromeChild);
-  for (const child of children.reverse()) if (child.exitCode === null) child.kill('SIGTERM');
-  if (activeProfile) await rm(activeProfile, { recursive: true, force: true });
+  await resources.cleanup();
 }

@@ -27,7 +27,7 @@ def token_hash(token):
 def main():
     parser = argparse.ArgumentParser(__doc__)
     parser.add_argument('--navigation', action='store_true')
-    parser.add_argument('--output', type=Path, default=Path('/private/tmp/scc-missing-facts.json'))
+    parser.add_argument('--output', type=Path, help='Explicit retained JSON destination; omit to print summary only')
     args = parser.parse_args()
     digest = lambda b: hashlib.sha256(b).hexdigest()
     result = {'method': 'Original resources + original EXE bytes; not original process execution',
@@ -187,9 +187,10 @@ def main():
             nav[name]['observable_probe'] = {'requested_point': [581, 554],
                                               'q': scene.q(581, 554), 'route': gate}
         result['navigation_replay'] = nav
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
-    print(json.dumps({'output': str(args.output), 'counts': result['counts'],
+    if args.output is not None:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(json.dumps(result, ensure_ascii=False, indent=2) + '\n')
+    print(json.dumps({'output': str(args.output) if args.output else None, 'counts': result['counts'],
                       'cross_scene_clicks': len(cross_scene), 'fault_anomalies': fault_anomalies,
                       'ignored_constructs': result['ignored_constructs'],
                       'map_banks': result['map_banks'],

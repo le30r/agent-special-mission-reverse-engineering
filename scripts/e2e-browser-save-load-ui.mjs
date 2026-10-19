@@ -1,6 +1,6 @@
+import { resources } from './lib/e2e-resources.mjs';
 /** UI-only save/reload/load plus downloaded JSON import with a real canvas pickup. */
-import { mkdtemp, writeFile } from 'node:fs/promises';
-import os from 'node:os';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const cdp=(process.env.E2E_CDP??'http://127.0.0.1:9222').replace(/\/$/,'');
 const url=process.env.E2E_URL??'http://127.0.0.1:5197/?debug=scenes';
@@ -23,7 +23,8 @@ async function clickSelector(selector, text) {
 }
 async function fkey(key){await send('Input.dispatchKeyEvent',{type:'rawKeyDown',key,code:key,windowsVirtualKeyCode:key==='F2'?113:114});await send('Input.dispatchKeyEvent',{type:'keyUp',key,code:key,windowsVirtualKeyCode:key==='F2'?113:114});}
 try {
-  const downloadDir=await mkdtemp(path.join(os.tmpdir(),'agent-save-json-'));
+  const downloadDir=resources.tempDir('downloads');
+  await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloadDir});
   await send('Page.enable');await send('Runtime.enable');await send('Page.navigate',{url});
   await waitFor('active Level1',async()=>await evaluate('Boolean(window.__saveLoadDebug&&window.__sccDebug?.view())'));
   await waitFor('eligible save point',async()=>await evaluate('window.__saveLoadDebug.canSave().ok'));
@@ -80,4 +81,8 @@ try {
   assert(imported.inventory.includes(4),'exported JSON restores through file picker and UI confirmation');
   assert(imported.slots.every(x=>x===null),'file import does not write any persistent slot');
   console.log('Save/Load UI E2E passed: real pickup, F2 slot save, hard reload, F3 load, current-state JSON download, clean-slot file import, restored live scene.');
-} finally { socket.close(); }
+} finally {
+  try { await Promise.race([send('Browser.setDownloadBehavior',{behavior:'default'}),sleep(1000)]); } finally {
+    await resources.cleanup();
+  }
+}

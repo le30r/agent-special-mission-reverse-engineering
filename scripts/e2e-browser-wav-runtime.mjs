@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Deterministic scheduler fixtures with actual corpus WAVs and real Chromium Web Audio.
  * Uses a disposable target; never installs the E2E mute hook or disables autoplay.
  */
@@ -6,7 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const endpoint = process.env.E2E_CDP ?? 'http://127.0.0.1:9222';
 const url = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
-const output = process.env.E2E_OUTPUT_DIR ?? '/private/tmp/wav-runtime-e2e';
+const output = process.env.E2E_OUTPUT_DIR ?? resources.tempDir('artifacts');
 async function connect(address) {
   const socket = new WebSocket(address);
   await new Promise((resolve, reject) => { socket.addEventListener('open', resolve, { once: true }); socket.addEventListener('error', reject, { once: true }); });

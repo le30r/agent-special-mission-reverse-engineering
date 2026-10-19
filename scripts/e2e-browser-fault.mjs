@@ -1,11 +1,12 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /** Original-resource Fault integration: Level1 Morda plus both Level29 Janitor voices. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const cdp = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const url = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
-const out = process.env.E2E_OUTPUT_DIR ?? path.join('research', 'scc', 'evidence', 'fault-e2e');
+const out = process.env.E2E_OUTPUT_DIR ?? resources.tempDir('artifacts');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 function assert(ok, message) { if (!ok) throw new Error(`Assertion failed: ${message}`); }
 

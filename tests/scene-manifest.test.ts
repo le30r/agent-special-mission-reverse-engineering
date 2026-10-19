@@ -1,5 +1,5 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { TestResources } from '../scripts/lib/test-resources.mjs';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -100,7 +100,8 @@ describe('automatic scene discovery', () => {
   }, 30000);
 
   it('classifies missing mandatory and optional resources explicitly', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'agent-scene-missing-'));
+    const resources = new TestResources();
+    const root = resources.tempDir('scene-missing');
     try {
       await writeFixture(root, {
         'game-resources/block1/Backgrd/Present.TIF': 'present',
@@ -124,12 +125,13 @@ describe('automatic scene discovery', () => {
       expect(optional).toEqual(expect.arrayContaining(['mult']));
       expect(discovery.diagnostics.some((diagnostic) => diagnostic.level === 'error')).toBe(true);
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await resources.cleanup();
     }
   });
 
   it('keeps a missing external MULT image optional and reports it', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'agent-scene-external-'));
+    const resources = new TestResources();
+    const root = resources.tempDir('scene-external');
     try {
       await writeFixture(root, {
         'game-resources/block1/Backgrd/Scn_99.TIF': 'present',
@@ -153,7 +155,7 @@ describe('automatic scene discovery', () => {
         paths: ['Tzu\\Scn_99\\Missing\\S0\\gone.tif'],
       });
     } finally {
-      await rm(root, { recursive: true, force: true });
+      await resources.cleanup();
     }
   });
 

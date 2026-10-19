@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { resources } from './lib/e2e-resources.mjs';
 /**
  * Chromium E2E: Level1 -> (pistol + bottle) -> hammock -> Level38 -> hooligan
  * fight -> Lora conversation.
@@ -24,7 +25,7 @@ import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 
 const cdpEndpoint = (process.env.E2E_CDP ?? 'http://127.0.0.1:9222').replace(/\/$/, '');
 const startUrl = process.env.E2E_URL ?? 'http://127.0.0.1:4173/?debug=scenes';
-const screenshotDir = process.env.E2E_SCREENSHOT_DIR ?? path.join('research', 'gameplay', 'evidence', 'lora');
+const screenshotDir = process.env.E2E_SCREENSHOT_DIR ?? resources.tempDir('artifacts');
 const logicalWidth = 800;
 const logicalHeight = 600;
 
