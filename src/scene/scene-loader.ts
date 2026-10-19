@@ -1,5 +1,6 @@
 import type { SccPortal } from '../scc/runtime';
 import type { SceneDeclarationKind, SceneRect } from '../navigation/depth-sort';
+import { findNamedObject } from './object-identity';
 
 export type SceneImageReference = { file: string; frame: number; slot: number; child: number };
 /**
@@ -58,7 +59,7 @@ export function depthOriginLabel(provenance: DepthProvenance | undefined): strin
  * tests can verify the same mutation the renderer performs from Objzet/Fram.
  */
 export function setStateDepth(state: SceneState, name: string, depth: number, provenance: DepthProvenance): SceneObjectState {
-  const object = state.objects.get(name);
+  const object = findNamedObject(state.objects.values(), name);
   if (object) {
     object.depth = depth;
     object.depthProvenance = provenance;
@@ -82,14 +83,21 @@ export class SceneLoader {
   state(id: number): SceneState { let value = this.states.get(id); if (!value) { value = createSceneState(id); this.states.set(id,value); } return value; }
   /** Cross-scene Click reads never allocate a scene or a missing object placeholder. */
   readState(sceneId: number, name: string): number {
-    return this.states.get(sceneId)?.objects.get(name)?.state ?? 0;
+    const target = this.states.get(sceneId);
+    return target ? findNamedObject(target.objects.values(), name)?.state ?? 0 : 0;
   }
   lstate(scene: number, name: string, value: number): void {
-    const target = this.state(scene), old = target.objects.get(name);
+    const target = this.state(scene), old = findNamedObject(target.objects.values(), name);
     if (old) old.state = value; else if (!target.initialized) target.objects.set(name,{ name,state:value,depth:0,placeholder:true });
   }
   declareObject(scene: SceneState, object: SceneObjectState): void {
-    const old = scene.objects.get(object.name);
+    const exact = scene.objects.get(object.name);
+    // An Lstate-created placeholder can precede loading the target scene and use
+    // different casing from its declaration. Merge only that alias; preserve
+    // separate declared entries so corpus collisions remain observable.
+    const alias = exact ? undefined : findNamedObject(scene.objects.values(), object.name);
+    const old = exact ?? (alias?.placeholder ? alias : undefined);
+    if (alias?.placeholder && !exact) scene.objects.delete(alias.name);
     // Re-parsing a scene must not recreate object state. A real object keeps its
     // State, Objzet depth, last rendered MULT reference and visibility; a placeholder
     // only carries State forward (theme of 0x407c14 / 0x407ffc: objects and State stay).
