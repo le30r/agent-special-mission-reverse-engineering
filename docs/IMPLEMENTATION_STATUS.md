@@ -216,6 +216,6 @@ pnpm catalog:report
 - Resource ownership защищён forked `SceneAssetProvider`: candidate загружает независимые scene definitions/MULT textures, background/external textures используют ref counts; old provider освобождается только после swap. Старые асинхронные callbacks захватывают provider своего поколения, а restore блокирует flush/input до commit.
 - Debug hook `window.__saveLoadDebug` доступен с `?debug=save` или `?debug=scenes`; добавлен Chromium Save/Load Core E2E с настоящим SCC pickup, несовместимым импортом без побочного эффекта, rollback same-scene и повторным gameplay pickup.
 
-**Проверки текущего среза:** `pnpm build`; `pnpm test` — 20 файлов / 177 тестов; `pnpm e2e:browser:all` — 9/9; Save/Load Core same-scene E2E; standalone Level21 ladder и Lora E2E; каталог 47/47.
+**Проверки текущего среза:** `pnpm build`; `pnpm test` — 20 файлов / 178 тестов; `pnpm e2e:browser:all` — 9/9; Save/Load Core same-scene E2E; standalone Level21 ladder и Lora E2E; каталог 47/47. Отдельный unit-тест подтверждает, что ошибка загрузки ресурсов candidate при import оставляет прежние `view` и `loader` активными.
 
 **Ограничения:** нет UI/localStorage/slot repository; browser policy намеренно строже оригинала; нет импорта оригинального `.sav`; runtime-ошибка нового Start после commit возвращается как `RestoreFailed` и не откатывает уже committed session; profile legacy-zone сохраняет только реально имеющуюся модель и не выдумывает banked unlocks.
