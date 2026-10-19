@@ -42,6 +42,7 @@ function fakeViewFactory(order: string[]) {
       selectedItem: 0,
       animationLog: [] as string[],
       disposed: false,
+      blockReason: undefined as string | undefined,
       initRuns: 0,
       startRuns: 0,
       id: definition.id,
@@ -52,6 +53,8 @@ function fakeViewFactory(order: string[]) {
       selectItem: () => {},
       pointerDown: () => {},
       tick: () => {},
+      inTick: false,
+      saveBlockReason: () => view.blockReason,
       status: () => ({ scene: definition.id, position: [0, 0], direction: 6, depth: 0, scale: 1, scroll: 0, objects: 0, inventory: [], selectedItem: 0, active: {} }),
       objectDebug: () => undefined,
       depthReport: () => '',
@@ -88,6 +91,20 @@ async function setup() {
 }
 
 describe('lazy scene loading and release', () => {
+  it('offers Save only at a post-tick boundary and denies pending transitions or unsafe views', async () => {
+    const {session,provider,scene1}=await setup();
+    session.request(1,-1,'boot'); session.flush();
+    provider.pending.get(1)!.resolve(scene1); await tick(); session.flush();
+    expect(session.canSave()).toMatchObject({ok:false,code:'Busy'});
+    session.markPostTick();
+    expect(session.canSave()).toEqual({ok:true});
+    (session.view as unknown as {blockReason?:string}).blockReason='hero is moving';
+    expect(session.canSave()).toMatchObject({ok:false,code:'Busy',reason:'hero is moving'});
+    (session.view as unknown as {blockReason?:string}).blockReason=undefined;
+    session.request(39,0);
+    expect(session.canSave()).toMatchObject({ok:false,code:'TransitionInProgress'});
+  });
+
   it('keeps the old scene until the requested scene resources have loaded', async () => {
     const { session, provider, order, scene1, scene39 } = await setup();
     session.request(1, -1, 'boot');

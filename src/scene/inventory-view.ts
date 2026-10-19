@@ -88,6 +88,13 @@ export class InventoryView {
     this.drawIcons();
   }
 
+  /** Discards transient panel/selection state after loading a new world snapshot. */
+  resetForRestore(): void {
+    this.setOpen(false);
+    this.pendingSelection = 0;
+    this.drawIcons();
+  }
+
   private drawIcons(): void {
     this.icons.removeChildren().forEach((child) => child.destroy());
     this.items.filter((id) => id >= 0).forEach((id, ordinal) => {

@@ -6,7 +6,7 @@ import { AnimationPlayer } from '../animation/player';
 import { selectFaultVoiceIndex, SccRuntime, type FaultList } from '../scc/runtime';
 import type { SceneDefinition } from './scene-definition';
 import { normalizeExternalPath } from './scene-definition';
-import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneObjectState, type SceneState, type Transform, type PersistentHeroState } from './scene-loader';
+import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneImageReference, type SceneObjectState, type SceneState, type Transform, type PersistentHeroState } from './scene-loader';
 import type { SceneEntry } from './scene-entry';
 import { cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
 import { activeHitTest, worldPointFromScreen } from './active-hit';
@@ -80,6 +80,7 @@ export class SceneView {
   private readonly activeBarriers = new Map<string, number>();
   private activeMask: SceneDefinition['mask'];
   private inputBlocked = false;
+  private insideTick = false;
 
   constructor(
     readonly definition: SceneDefinition,
@@ -162,12 +163,66 @@ export class SceneView {
   private get mask() { return this.activeMask; }
   get blocked(): boolean { return this.inputBlocked; }
   get moving(): boolean { return Boolean(this.movement && this.movement.remaining > 0); }
+  get inTick(): boolean { return this.insideTick; }
+  get hasScenarioBarrier(): boolean { return this.activeBarriers.size > 0; }
+  get hasPendingFclick(): boolean { return this.scc.programs.some((program) => program.active && program.program.commands.some((command) => command.op === 'StartW')); }
+
+  /** Read-only save gate hints; ambient looping animations are deliberately ignored. */
+  saveBlockReason(): string | undefined {
+    if (this.insideTick) return 'not at post-tick boundary';
+    if (this.moving) return 'hero is moving';
+    if (this.scc.busy || this.scc.programs.some((program) => program.active)) return 'SCC program is active';
+    if (this.activeBarriers.size) return 'scenario media barrier is active';
+    if (this.inputBlocked) return 'temporary blocked scene mode is active';
+    for (const [name, state] of this.player.states) {
+      const definition = this.player.definition(name);
+      if (state.active && definition && !definition.loop && !definition.locomotion) return `finite animation ${name} is active`;
+    }
+    return undefined;
+  }
+
+  /** Applies saved visuals and hero pose without dispatching frame/audio/Fclick events. */
+  restoreHero(mode: PersistentHeroState['mode'], position: Point, transform?: Transform, image?: SceneImageReference): void {
+    this.movement = undefined;
+    this.hero.visible = mode !== 'hidden';
+    if (mode === 'navigation') {
+      const corrected = position[0] >= 0 ? correctPosition(this.mask, position) : undefined;
+      this.heroPosition = corrected ? [...corrected.point] : [position[0], position[1]];
+      this.heroDirection = 0;
+      this.heroIsObjectSpace = false;
+      this.hero.anchor.set(0.5, 1);
+      this.hero.x = this.heroPosition[0]; this.hero.y = this.heroPosition[1];
+      this.hero.scale.set(this.scaleHere());
+      const stop = this.definition.animations.get('Stop0');
+      const record = stop?.file.frames[0]?.find((item) => item.name.toUpperCase() === 'MAINHERO');
+      if (stop && record) this.applyRecord(record, stop.file, 'Stop0', 1, 'initialization');
+    } else {
+      this.heroPosition = [position[0], position[1]];
+      this.heroIsObjectSpace = mode === 'object';
+      if (image) {
+        const animation=this.definition.animations.get(image.file);
+        const record=animation?.file.frames[image.frame-1]?.find(item=>item.slot===image.slot&&item.child===image.child);
+        if (animation && record?.name.toUpperCase()==='MAINHERO') this.applyRecord(record,animation.file,image.file,image.frame,'initialization');
+      }
+      this.heroPosition = [position[0], position[1]];
+      if (transform) {
+        this.hero.x = transform.x; this.hero.y = transform.y;
+        this.hero.scale.set(transform.scaleX, transform.scaleY);
+        this.hero.anchor.set(transform.anchorX, transform.anchorY);
+      }
+    }
+    this.hero.visible = mode !== 'hidden';
+    this.scrollX = updateScroll(0, this.heroPosition[0], this.mask.width, VIEWPORT_WIDTH);
+    this.root.x = -this.scrollX;
+    this.heroDepth = depthAt(this.mask, Math.round(this.heroPosition[0]), Math.round(this.heroPosition[1]), this.focus);
+    this.hero.zIndex = pixiDepthIndex(this.heroDepth);
+  }
 
   /** Returns detached persistent fields without touching schedulers, route, sound or the live scene. */
   capturePersistentState(): { hero: PersistentHeroState; objects: Map<string, SceneObjectState>; savedPosition: [number, number]; savedDirection: number } {
     const objects = new Map<string, SceneObjectState>();
     for (const [name, stored] of this.state.objects) {
-      const sprite = this.objects.get(name)?.sprite;
+      const sprite = name.toUpperCase()==='MAINHERO' ? this.hero : this.objects.get(name)?.sprite;
       objects.set(name, {
         ...stored,
         ...(stored.mult ? { mult: { ...stored.mult } } : {}),
@@ -234,6 +289,7 @@ export class SceneView {
         this.skippedMultRecords.add(record.name);
         continue;
       }
+      if (stored.imageUnassigned) continue;
       const resolved = file.resolve(record.slot, record.child);
       if (resolved.width === 0 || resolved.height === 0) continue;
       let texture: Texture, hitPixels: Uint8ClampedArray | undefined, width: number, height: number;
@@ -255,6 +311,10 @@ export class SceneView {
       sprite.zIndex = pixiDepthIndex(depth);
       this.world.addChild(sprite);
       this.objects.set(stored.name, { name: stored.name, sprite, depth, width, height, hitPixels, removed: false, order: this.objectOrder++ });
+      if (!stored.imageHidden && !stored.mult && this.definition.layoutAnimation) {
+        stored.mult = { file:this.definition.layoutAnimation, frame:1, slot:record.slot, child:record.child };
+        stored.imageUnassigned = false;
+      }
     }
   }
 
@@ -267,7 +327,17 @@ export class SceneView {
       if (!animation) continue;
       const record = animation.file.frames[reference.frame - 1]?.find((item) => item.slot === reference.slot && item.child === reference.child);
       if (!record || record.name === 'Mainhero') continue;
+      const transform = stored.transform ? { ...stored.transform } : undefined;
+      const visible = stored.visible;
       this.applyRecord(record, animation.file, reference.file, reference.frame, 'initialization');
+      const sprite = this.objects.get(stored.name)?.sprite;
+      if (sprite && transform) {
+        sprite.position.set(transform.x, transform.y);
+        sprite.scale.set(transform.scaleX, transform.scaleY);
+        sprite.anchor.set(transform.anchorX, transform.anchorY);
+        stored.transform = transform;
+      }
+      if (sprite && visible !== undefined) { sprite.visible = visible; stored.visible = visible; }
     }
   }
 
@@ -381,6 +451,7 @@ export class SceneView {
       return;
     }
     assignImageReference(stored, reference);
+    stored.imageUnassigned = false;
   }
 
   private applyRecord(record: MultObject, file: MultFile, animationName: string, frame: number, source: UpdateSource): void {
@@ -537,6 +608,8 @@ export class SceneView {
 
   /** One game tick for the active scene; ordering mirrors the current engine loop. */
   tick(deltaMS: number, elapsedNow: number, tickNumber: number): void {
+    this.insideTick = true;
+    try {
     this.tickNumber = tickNumber;
     this.scc.tick();
     this.updateSoundEvents(Math.trunc(elapsedNow));
@@ -569,6 +642,7 @@ export class SceneView {
     this.hero.zIndex = pixiDepthIndex(this.heroDepth);
     // Pixi renders children in the sorted array order, ascending zIndex.
     this.world.sortChildren();
+    } finally { this.insideTick = false; }
   }
 
   /** Poll frame hooks before frame advancement, preserving source-order handoff in one update. */
