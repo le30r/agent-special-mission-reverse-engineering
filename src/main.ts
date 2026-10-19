@@ -1,4 +1,4 @@
-import { Application, Container } from 'pixi.js';
+import { Application, Container, Graphics } from 'pixi.js';
 import type { Point } from './navigation/router';
 import { SceneSession } from './scene/scene-session';
 import type { SceneView } from './scene/scene-view';
@@ -111,6 +111,7 @@ async function main() {
   const parameters = new URLSearchParams(location.search);
   const depthDebug = parameters.get('debug') === 'depth';
   const sceneDebug = parameters.get('debug') === 'scenes';
+  const hitboxDebug = parameters.get('debug') === 'hitbox';
   const saveDebug = parameters.get('debug') === 'save' || sceneDebug;
 
   const app = new Application();
@@ -162,13 +163,19 @@ async function main() {
   const saveLoadButton = document.createElement('button');
   saveLoadButton.type = 'button'; saveLoadButton.className = 'save-load-launch'; saveLoadButton.textContent = 'Сохранить / загрузить · F2 / F3';
   saveLoadButton.onclick = () => void saveLoadView.open('save'); host.appendChild(saveLoadButton);
-  const debugPanel = sceneDebug ? new DebugPanel(catalog.manifest, session, inventoryView) : undefined;
+  const debugPanel = sceneDebug || hitboxDebug ? new DebugPanel(catalog.manifest, session, inventoryView, hitboxDebug) : undefined;
+  if (hitboxDebug) host.dataset.hitboxDebug = 'true';
+  const hitboxPanel = hitboxDebug ? document.createElement('pre') : undefined;
+  if (hitboxPanel) { hitboxPanel.className = 'hitbox-debug'; host.appendChild(hitboxPanel); }
+  const hitboxGraphics = new Graphics();
+  hitboxGraphics.eventMode = 'none';
   if (debugPanel) host.appendChild(debugPanel.root);
-  if (sceneDebug) {
-    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown };
+  if (sceneDebug || hitboxDebug) {
+    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown; __hitboxDebug?: unknown };
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
     debugWindow.__sccDebug = { session, view: () => session.view };
     debugWindow.__inventoryDebug = { view: () => ({ open: inventoryView.open, pendingSelection: inventoryView.pendingSelection }) };
+    if (hitboxDebug) debugWindow.__hitboxDebug = { graphics: hitboxGraphics, view: () => session.view };
   }
   if (saveDebug) {
     const debugWindow = window as Window & { __saveLoadDebug?: unknown };
@@ -181,6 +188,8 @@ async function main() {
   // The initial scene uses the same deferred boundary as an SCC Level command.
   session.request(1, -1, 'boot');
   session.flush();
+  if ((sceneDebug || hitboxDebug) && session.view) session.view.root.addChild(hitboxGraphics);
+  if (session.view) session.view.hitboxDebugEnabled = hitboxDebug;
 
   if (depthDebug) host.appendChild(buildSceneControls(catalog.manifest, session));
 
@@ -193,6 +202,8 @@ async function main() {
     // A scene switch (including its lazy resource load) is applied only at this boundary.
     session.flush();
     const view = session.view;
+    if ((sceneDebug || hitboxDebug) && view && hitboxGraphics.parent !== view.root) view.root.addChild(hitboxGraphics);
+    if (view) view.hitboxDebugEnabled = host.dataset.hitboxDebug === 'true';
     inventoryView.setItems(session.loader.inventory);
     debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
@@ -204,6 +215,37 @@ async function main() {
         : 'ANIMATION TRACE · no active scene';
     }
     if (scenePanel) scenePanel.textContent = describeSession(session, catalog.manifest, provider, unsupported);
+    if (hitboxPanel) {
+      const pointer = hitboxPanel.dataset.pointer?.split(',').map(Number) ?? [0, 0];
+      const report = view?.hitboxSnapshot(pointer[0], pointer[1]);
+      hitboxGraphics.clear();
+      if (report && view && host.dataset.hitboxDebug === 'true') {
+        for (const object of view.hitboxRenderGeometry()) {
+          if (object.width && object.height && object.hitPixels) {
+            const x = object.x - object.width / 2, y = object.y - object.height / 2;
+            const isHit = report.objects.find((candidate) => candidate.name === object.name)?.hit ?? false;
+            const color = !object.visible ? 0xff3c3c : isHit ? 0xffdf35 : 0x36ff65;
+            for (let row = 0; row < object.height; row++) {
+              let start = -1;
+              for (let col = 0; col <= object.width; col++) {
+                const alpha = col < object.width && object.hitPixels[(row * object.width + col) * 4 + 3] !== 0;
+                if (alpha && start < 0) start = col;
+                if (!alpha && start >= 0) { hitboxGraphics.rect(x + start, y + row, col - start, 1).fill({ color, alpha: 0.48 }); start = -1; }
+              }
+            }
+          } else if (object.width && object.height) {
+            hitboxGraphics.rect(object.x - object.width / 2, object.y - object.height / 2, object.width, object.height).stroke({ color: 0xff3c3c, width: 2 });
+          }
+        }
+        for (const active of report.actives) {
+          const color = active.visible ? 0x319bff : 0xff3c3c;
+          hitboxGraphics.rect(active.rect.left, active.rect.top, active.rect.right - active.rect.left, active.rect.bottom - active.rect.top)
+            .fill({ color, alpha: active.visible ? 0.18 : 0.09 }).stroke({ color, width: 2 });
+        }
+      }
+      if (report) hitboxPanel.textContent = `HITBOX DEBUG · Level${report.scene} · scrollX=${report.scrollX}\nPointer screen=(${report.screen.join(',')}) world=(${report.world.join(',')}) · selected item=${view?.selectedItem ?? 0}\nHover: ${report.objects.filter((object) => object.hit || object.withinGeometry).map((object) => `${object.name} [${object.kind}] state=${object.state} depth=${object.depth} cursorId=${object.cursorId ?? '—'} visible=${object.visible} MULT=${object.mult} Click=${object.hasClickHandlers ? 'yes' : 'no'} Case=${object.caseMatch ? 'match' : 'miss'} (${object.case}) hit=${object.hit ? 'yes' : `no (${object.rejection})`}`).join('\n') || 'No nearby objects'}\nActive: ${report.actives.map((item) => `${item.name} ${item.hit ? 'HIT' : item.reason}`).join('; ') || 'none'}\n\nCLICK TRACE\n${report.clickTrace}`;
+      else hitboxPanel.textContent = 'HITBOX DEBUG · no active scene';
+    }
     const botl = session.loader.state(1).objects.get('Botl')?.state ?? 0;
     const selected = view?.selectedItem ?? 0;
     const loading = session.loading;
@@ -228,6 +270,9 @@ async function main() {
       return;
     }
     view.pointerDown(x, y);
+  });
+  if (hitboxPanel) app.canvas.addEventListener('pointermove', (event) => {
+    const [x, y] = screenPosition(app, event); hitboxPanel.dataset.pointer = `${x},${y}`;
   });
 
   window.addEventListener('resize', () => {

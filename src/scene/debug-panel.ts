@@ -21,11 +21,13 @@ export class DebugPanel {
   private inventorySnapshot = '';
   private stateSnapshot = '';
   private selectedId = 1;
+  private readonly hitboxToggle = document.createElement('input');
 
   constructor(
     private readonly manifest: { scenes: SceneManifestEntry[] },
     private readonly session: SceneSession,
     private readonly inventoryView: InventoryView,
+    hitboxEnabled = false,
   ) {
     this.root.className = 'debug-panel scene-controls';
     this.root.innerHTML = '<header><strong>DEBUG PANEL</strong><span>только ?debug=scenes</span></header>';
@@ -41,6 +43,12 @@ export class DebugPanel {
     header.onkeydown = (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); toggle(); } };
     body.append(this.section('Инвентарь', this.inventoryControls()));
     body.append(this.section('Сцена', this.sceneControls()));
+    const hitbox = document.createElement('label');
+    this.hitboxToggle.type = 'checkbox'; this.hitboxToggle.setAttribute('aria-label', 'Включить hitbox debugger');
+    this.hitboxToggle.checked = hitboxEnabled;
+    this.hitboxToggle.onchange = () => { document.querySelector<HTMLElement>('#game')?.setAttribute('data-hitbox-debug', String(this.hitboxToggle.checked)); };
+    hitbox.append(this.hitboxToggle, document.createTextNode(' Hitbox debugger'));
+    body.append(this.section('Диагностика кликов', hitbox));
     body.append(this.section('SCC State Inspector', this.stateControls()));
     this.renderItems(); this.refresh();
   }

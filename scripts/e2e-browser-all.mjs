@@ -64,7 +64,7 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
-  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs']);
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-hitbox.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
   if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
   const scripts = startAt && from < 0 ? [startAt] : suite.slice(from);
@@ -76,7 +76,7 @@ try {
       `--remote-debugging-port=${cdpPort}`, '--remote-allow-origins=*', `--user-data-dir=${profile}`, 'about:blank',
     ], { stdio: 'ignore' });
     await waitFor(`http://127.0.0.1:${cdpPort}/json/version`, 'Chromium CDP');
-    const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : baseUrl;
+    const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : script === 'e2e-browser-hitbox.mjs' ? `http://127.0.0.1:${port}/?debug=hitbox` : baseUrl;
     await runE2e(script, pageUrl);
     const finishedChrome = chromeChild;
     await stop(finishedChrome);

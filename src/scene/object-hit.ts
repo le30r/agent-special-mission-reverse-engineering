@@ -16,21 +16,33 @@ export type HitTarget = {
  * only where the prepared pixel alpha is non-zero (RGB 0xB5B5B5 is the color key).
  */
 export function hitTest(target: HitTarget | undefined, x: number, y: number): boolean {
-  if (!target || !target.visible || target.removed || !target.hitPixels) return false;
+  return Boolean(target && hitRejectionReason(target, x, y) === undefined);
+}
+
+export function hitRejectionReason(target: HitTarget, x: number, y: number): string | undefined {
+  if (!target.visible) return 'hidden';
+  if (target.removed) return 'removed';
+  if (!target.hitPixels) return 'no hit image';
   const ix = Math.floor(x - (target.x - target.width / 2));
   const iy = Math.floor(y - (target.y - target.height / 2));
-  if (ix < 0 || iy < 0 || ix >= target.width || iy >= target.height) return false;
-  return target.hitPixels[(iy * target.width + ix) * 4 + 3] !== 0;
+  if (ix < 0 || iy < 0 || ix >= target.width || iy >= target.height) return 'outside image bounds';
+  if (target.hitPixels[(iy * target.width + ix) * 4 + 3] === 0) return 'transparent pixel';
+  return undefined;
 }
 
 export type DepthHitTarget = HitTarget & { name: string; depth: number; order: number };
+
+/** Same order used by firstHitTarget and the SceneView input pipeline. */
+export function orderedHitTargets<T extends DepthHitTarget>(targets: readonly T[]): T[] {
+  return [...targets].sort((a, b) => Math.abs(a.depth) - Math.abs(b.depth) || a.order - b.order);
+}
 
 /**
  * Returns the front-most hit target. Absent evidence for the native tie order of
  * equal abs(depth), insertion order is kept as a deterministic approximation.
  */
 export function firstHitTarget(targets: readonly DepthHitTarget[], x: number, y: number): DepthHitTarget | undefined {
-  const ordered = [...targets].sort((a, b) => Math.abs(a.depth) - Math.abs(b.depth) || a.order - b.order);
+  const ordered = orderedHitTargets(targets);
   for (const target of ordered) {
     if (Math.abs(target.depth) === 0) continue;
     if (hitTest(target, x, y)) return target;
