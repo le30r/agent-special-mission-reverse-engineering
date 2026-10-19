@@ -9,6 +9,8 @@ import { VIEWPORT_HEIGHT, VIEWPORT_WIDTH } from './config';
 import './style.css';
 import { BrowserAudioBackend } from './audio/backend';
 import { DebugPanel } from './scene/debug-panel';
+import { SaveRepository } from './scene/save-repository';
+import { SaveLoadView } from './scene/save-load-view';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -148,6 +150,18 @@ async function main() {
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
     onLoadError: (scene, error) => { console.error(`Scene ${scene} failed to load`, error); },
   });
+  const saveRepository = new SaveRepository(undefined, { contentId: catalog.manifest.contentId, sceneIds: catalog.manifest.summary.loadable });
+  const saveLoadView = new SaveLoadView({
+    repository: saveRepository,
+    validation: { contentId: catalog.manifest.contentId, sceneIds: catalog.manifest.summary.loadable },
+    canSave: () => session.canSave(),
+    exportSave: (label) => session.exportSave(label),
+    importSave: (save) => session.importSave(save),
+  });
+  host.appendChild(saveLoadView.root);
+  const saveLoadButton = document.createElement('button');
+  saveLoadButton.type = 'button'; saveLoadButton.className = 'save-load-launch'; saveLoadButton.textContent = 'Сохранить / загрузить · F2 / F3';
+  saveLoadButton.onclick = () => void saveLoadView.open('save'); host.appendChild(saveLoadButton);
   const debugPanel = sceneDebug ? new DebugPanel(catalog.manifest, session, inventoryView) : undefined;
   if (debugPanel) host.appendChild(debugPanel.root);
   if (sceneDebug) {
@@ -220,6 +234,20 @@ async function main() {
     const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
     app.canvas.style.width = `${VIEWPORT_WIDTH * scale}px`;
     app.canvas.style.height = `${VIEWPORT_HEIGHT * scale}px`;
+  });
+  window.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && saveLoadView.isOpen) {
+      event.preventDefault(); saveLoadView.close(); return;
+    }
+    const target = event.target;
+    const typing = target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
+    if (typing) return;
+    if (event.key === 'F2') {
+      event.preventDefault(); void saveLoadView.open('save'); return;
+    }
+    if (event.key === 'F3') {
+      event.preventDefault(); void saveLoadView.open('load');
+    }
   });
   window.dispatchEvent(new Event('resize'));
 }
