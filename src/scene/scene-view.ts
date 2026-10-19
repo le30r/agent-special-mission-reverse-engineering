@@ -763,7 +763,12 @@ export class SceneView {
       if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${debugWorldX},${debugWorldY})\nHit candidates: not evaluated\nActual selected target: Plane (input-blocked fallback)\nSCC handler lookup: ${this.handlerSummary('Plane', selectedItem)}\nState / Case: ${this.caseSummary('Plane', selectedItem)}\nProgram dispatched: ${this.scc.handlers.some((handler) => handler.event === 'Plane' && handler.itemId === selectedItem) ? 'yes' : 'no — rejected by handler/Case'}`;
       return;
     }
-    for (const [name, declaration] of this.definition.active) {
+    // Active rectangles share the native reverse-painter priority: a smaller
+    // absolute depth is in front. Declaration order alone lets Level29's None
+    // blocker (220) swallow the nested Slang2 hotspot (219).
+    const activeTargets = [...this.definition.active].sort(([a], [b]) =>
+      Math.abs(this.objectDepth(a)) - Math.abs(this.objectDepth(b)));
+    for (const [name, declaration] of activeTargets) {
       if (!declaration.rect) continue;
       const target = { visible: this.activeVisible(name), rect: declaration.rect };
       if (!activeHitTest(target, screenX, screenY, this.scrollX, 0)) continue;

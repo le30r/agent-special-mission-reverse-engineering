@@ -106,6 +106,45 @@ Keep background geometry and route scratch separate. Browser asynchronous
 preparation must not reorder visible SCC effects; prefetch or explicit prepare
 barrier is an adaptation, not evidence that original Setmsk yielded.
 
+## Browser Active overlap priority
+
+**Implemented contract:** `SceneView.pointerDown` checks visible `Active`
+rectangles in ascending absolute **current state depth**, not SCC declaration
+order. Smaller absolute depth is in front, consistent with the reverse-painter
+priority documented in [OBJECT_DEPTH](../rendering/OBJECT_DEPTH.md). Runtime
+depth changes participate; equal-depth targets retain declaration order as a
+deterministic approximation, not a confirmed native tie-break. Rectangle edges
+remain strict and scroll is subtracted exactly once by `activeHitTest`.
+
+**Level29 regression:** the original declarations contain an enclosing blocker
+and a smaller hose hotspot:
+
+```text
+Active None 0 220 370 283 470 344
+Active Slang2 6 219 423 322 464 340
+```
+
+At screen/world `(431,330)` with scroll 0, both rectangles hit. Declaration-order
+iteration selected `None`, which has no `Click 5 None` handler, making the hose
+impossible to cut. Depth priority selects `Slang2` (219 before 220). Its original
+`Click 5 Slang2 Narc 17` handler supports Narc states 0 and 9; Case 9 runs
+`Janitor_K`, sets Janitor state 1, removes item 5 and hides Slang2. Selection is
+geometric: an unmatched handler does not cause a search through lower zones.
+If Slang2 is hidden or moved behind None, None still blocks the click.
+
+**Scope / remaining approximation:** this fix applies to Active overlaps in all
+scenes. The browser still checks Active rectangles as a separate phase before
+base Object pixel hits; it does **not** implement one merged native depth list.
+It also does not change base Object ordering, SCC Cases, progression flags or
+save data. Other scenes have not all been manually replayed.
+
+**Verification:** `tests/scene-active-priority.test.ts` loads the real Level29
+definition and routes a pointer click with selected item 5 and external state 9
+through the real SCC Program. It asserts Janitor_K dispatch, Janitor state,
+inventory removal and hotspot hiding, plus hidden/behind blocker cases. Movement,
+animation startup and position rendering are stubbed; this is a runtime
+regression test, not browser visual or animation-completion evidence.
+
 ## Block / Ublock
 
 **Command / Syntax:** `Block` and `Ublock`; **no arguments or identifier**.
