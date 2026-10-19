@@ -72,6 +72,9 @@ try {
   const suite = [
     'e2e-browser-transition.mjs',
     'e2e-browser-level3-busy.mjs',
+    'e2e-browser-save-load.mjs',
+    'e2e-browser-save-load-ui.mjs',
+    'e2e-browser-save-state-identities.mjs',
     'e2e-browser-level1-interactions.mjs',
     'e2e-level39-columns.mjs',
     'e2e-browser-scene38.mjs',
@@ -82,10 +85,11 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
-  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs']);
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-save-state-identities.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
   if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
-  const scripts = startAt && from < 0 ? [startAt] : suite.slice(from);
+  const single = process.argv[2] && standalone.has(startAt);
+  const scripts = startAt && (from < 0 || single) ? [startAt] : suite.slice(from);
   for (const script of scripts) {
     console.log(`\n===== Chromium E2E: ${script} =====`);
     activeProfile = resources.tempDir('chromium');

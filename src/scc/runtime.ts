@@ -183,6 +183,29 @@ export function parseScc(source: string): SccHandler[] {
   return handlers;
 }
 
+/**
+ * Undeclared Object identities the SceneView host can create through State,
+ * Cursor or Objzet. Show/Hide alone cannot create an unknown object. Inspect
+ * parsed Programs, not raw lines: Click state selectors, Lstate, comments and
+ * commands outside Programs do not create local objects. Match the host's
+ * case-insensitive identity lookup. Use the same source as SccRuntime (not Inc
+ * declaration sources, whose Programs are not executed by this runtime).
+ */
+export function parseObjectCreationIdentities(source: string): ReadonlySet<string> {
+  const names = new Set<string>();
+  for (const handler of parseScc(source)) {
+    for (const program of handler.programs.values()) {
+      for (const command of program.commands) {
+        if ((command.op === 'State' || command.op === 'Cursor' || command.op === 'Objzet')
+          && typeof command.name === 'string' && command.name.length > 0) {
+          names.add(command.name.toUpperCase());
+        }
+      }
+    }
+  }
+  return names;
+}
+
 /** Cooperative SCC interpreter. It never hides waits inside promises/async functions. */
 export class SccRuntime {
   readonly states = new Map<string, number>();

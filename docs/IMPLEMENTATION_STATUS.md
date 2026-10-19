@@ -234,6 +234,14 @@ pnpm catalog:report
 
 **Ограничения:** localStorage не даёт атомарного compare-and-swap: версия проверяется непосредственно перед единичным `setItem`, но между проверкой и записью остаётся узкое окно гонки. Устройства/профили, очистившие данные origin, сохраняют переносимость через JSON export; старые JSON могут быть отклонены при изменении `contentId` или schema. Проверка `localStorage` ограничена текущим browser origin/profile.
 
+## Save/Load State-created identities — fix/save-state-identities
+
+**Срез:** 2026-10-20. Устранено расхождение между `SceneView.writeState` и импортом: допустимые динамические identity вычисляются из создающих объект команд `State`/`Cursor`/`Objzet` в Programs того же `parseScc`, который использует runtime, и исполняемых `Fram` depth hooks. Это не список исключений для конкретных сцен. Принимаются только необъявленные base `Object` своей сцены; явные типы деклараций сохраняются. Отсутствующий V1 `kind` означает `Object` и больше не обходит проверку. MULT chain и все проверки codec/contentId остаются прежними; SCC и формат файлов не изменены.
+
+21 новая unit-регрессия проверяет настоящий runtime → export → codec → restore roundtrip для State/Cursor/Objzet/Fram, сохранение State без повторного Init, регистр/default kind, неактивные посещённые сцены и отклонение посторонних имён, подмены типа, identity другой сцены, неверных MULT и неисполняемых Fram. В общий Chromium runner добавлены Save/Load Core, UI и отдельная State identity регрессия с опциональным импортом исходных пользовательских файлов. Подробности и результаты: [STATE_OBJECT_IDENTITIES](../research/save-load/STATE_OBJECT_IDENTITIES.md).
+
+**Проверки:** полный unit-набор с двумя workers — 24 файла / 214 тестов; `pnpm build` — passed; полный Chromium E2E — 13/13, каталог 47/47. Оба исходных файла `agent-save-level24-2026-10-19.json` и `agent-save-level29-2026-10-19.json` загружены через реальный UI импорта: активный уровень, точный inventory и динамическое состояние восстановлены; SHA-256 каждого исходного файла до/после совпадает. SCC, contentId и формат V1 не изменены. Ветка от локального `master` (`bd00847`), merge не выполнялся.
+
 ## Hitbox Debugger — feature/hitbox-debugger
 
 В отдельном worktree от локального актуального `master` добавлен `?debug=hitbox` и переключатель в существующей Debug Panel. SceneView предоставляет read-only hit-test snapshot и click trace, используя текущие `activeHitTest`, `hitTest`, порядок `firstHitTarget` и реальные маски alpha; отладчик не подменяет и не меняет dispatch.

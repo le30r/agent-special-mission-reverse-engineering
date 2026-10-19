@@ -6,6 +6,7 @@ import { SceneView, type SceneViewHooks } from './scene-view';
 import type { BrowserAudioBackend } from '../audio/backend';
 import { SaveCodec, type GameSaveV1, type Result, type SaveEligibility } from './save-codec';
 import { saveContentHash } from './save-codec';
+import { parseObjectCreationIdentities } from '../scc/runtime';
 
 /** Resources prepared for one scene visit; released when the scene is left. */
 export type LoadedScene = { definition: SceneDefinition; background: Texture };
@@ -212,9 +213,21 @@ export class SceneSession {
       if((save.world.hero?.mode ?? 'navigation')==='navigation'&&!candidateScene.definition.animations.has('Stop0')) throw Object.assign(new Error('Active scene has no Stop0 hero pose'),{code:'IncompatibleSave'});
       const validateSceneResources=(sceneId:number, definition:SceneDefinition) => {
         const saved=save.world.scenes.find(scene=>scene.id===sceneId)!;
+        const dynamicObjects=new Set(parseObjectCreationIdentities(definition.scc));
+        // Fram depth hooks call the same create-if-missing host as Objzet.
+        for(const event of definition.frameDepthEvents) {
+          const animation=definition.animations.get(event.animation);
+          if(animation && event.frame>=1 && event.frame<=animation.file.frameCount) dynamicObjects.add(event.objectName.toUpperCase());
+        }
+        const declaredNames=new Set([...definition.objects.keys(), ...definition.active.keys(), ...definition.lights.keys()].map(name=>name.toUpperCase()));
         for(const item of saved.objects) if(!item.placeholder) {
-          const declared=item.kind==='Active'?definition.active:item.kind==='Light'?definition.lights:item.kind==='Object'?definition.objects:undefined;
-          if(declared && ![...declared.keys()].some(name=>name.toUpperCase()===item.name.toUpperCase())) throw Object.assign(new Error(`Unknown ${item.kind} identity ${item.name} in scene ${sceneId}`),{code:'IncompatibleSave'});
+          // Omitted kind is the V1 default Object, not a validation bypass.
+          const kind=item.kind ?? 'Object';
+          const declared=kind==='Active'?definition.active:kind==='Light'?definition.lights:definition.objects;
+          const name=item.name.toUpperCase();
+          const known=[...declared.keys()].some(key=>key.toUpperCase()===name)
+            || (kind==='Object' && !declaredNames.has(name) && dynamicObjects.has(name));
+          if(!known) throw Object.assign(new Error(`Unknown ${kind} identity ${item.name} in scene ${sceneId}`),{code:'IncompatibleSave'});
           if(item.image.kind!=='mult') continue;
           const reference=item.image.reference;
           const animation=definition.animations.get(reference.file);
