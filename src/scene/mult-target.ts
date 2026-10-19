@@ -1,4 +1,5 @@
 import type { SceneObjectState } from './scene-loader';
+import { findNamedObject } from './object-identity';
 
 /**
  * Original frame update: `0x405064` resolves every MULT record name through
@@ -14,7 +15,9 @@ export function findFrameTarget(
   objects: ReadonlyMap<string, SceneObjectState>,
   name: string,
 ): SceneObjectState | undefined {
-  const object = objects.get(name);
+  // MULT resource names retain their original spelling; return the SCC
+  // declaration as canonical runtime identity.
+  const object = findNamedObject(objects.values(), name);
   if (!object) return undefined;
   if (object.kind === 'Active' || object.kind === 'Light') return undefined;
   return object;

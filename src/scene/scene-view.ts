@@ -13,6 +13,7 @@ import { activeHitTest, worldPointFromScreen } from './active-hit';
 import { applyObjectVisibility, assignImageReference } from './object-visibility';
 import { firstHitTarget } from './object-hit';
 import { findFrameTarget } from './mult-target';
+import { findNamedObject } from './object-identity';
 import { multHitPixels } from '../mult/hit-pixels';
 import { VIEWPORT_WIDTH } from '../config';
 import { SccAudioRuntime, stepSyncRange, type FrameSoundEvent } from '../audio/scc-audio';
@@ -141,10 +142,10 @@ export class SceneView {
       level: (scene, portal) => hooks.level(scene, portal),
       lstate: (scene, name, value) => hooks.lstate(scene, name, value),
       readState: (name, scene = -1) => scene === -1 || scene === this.definition.id
-        ? this.state.objects.get(name)?.state ?? 0
+        ? findNamedObject(this.state.objects.values(), name)?.state ?? 0
         : hooks.readState?.(scene, name) ?? 0,
       writeState: (name, value) => {
-        const object = this.state.objects.get(name);
+        const object = findNamedObject(this.state.objects.values(), name);
         if (object) object.state = value;
         else this.state.objects.set(name, {
           name, state: value, depth: 0, kind: 'Object',
@@ -177,7 +178,7 @@ export class SceneView {
   }
 
   private objectDepth(name: string): number {
-    return this.state.objects.get(name)?.depth ?? 0;
+    return findNamedObject(this.state.objects.values(), name)?.depth ?? 0;
   }
 
   private external(texturePath: string): ExternalTexture | undefined {
@@ -224,7 +225,7 @@ export class SceneView {
       const depth = stored.depth;
       sprite.zIndex = pixiDepthIndex(depth);
       this.world.addChild(sprite);
-      this.objects.set(record.name, { name: record.name, sprite, depth, width, height, hitPixels, removed: false, order: this.objectOrder++ });
+      this.objects.set(stored.name, { name: stored.name, sprite, depth, width, height, hitPixels, removed: false, order: this.objectOrder++ });
     }
   }
 
@@ -316,16 +317,17 @@ export class SceneView {
     const result = applyObjectVisibility(this.definition, this.state, name, visible);
     if (!result.found || !result.clearImage) return;
     if (name === 'Mainhero') { this.hero.visible = false; return; }
-    const object = this.objects.get(name);
+    const identity = findNamedObject(this.state.objects.values(), name)?.name ?? name;
+    const object = this.objects.get(identity);
     if (object) { object.sprite.visible = false; object.removed = false; }
   }
 
   /** Current `+0x297` visibility of an `Active`/`Light` name (debug/tests). */
-  activeVisible(name: string): boolean { return this.state.objects.get(name)?.visible ?? false; }
+  activeVisible(name: string): boolean { return findNamedObject(this.state.objects.values(), name)?.visible ?? false; }
 
   /** Current sprite/raster state of a rendered Object, for diagnostics and E2E. */
   objectDebug(name: string): { sprite: 'missing' | 'visible' | 'removed' | 'hidden'; width: number; height: number; depth: number; x: number; y: number } | undefined {
-    const object = this.objects.get(name);
+    const object = this.objects.get(findNamedObject(this.state.objects.values(), name)?.name ?? name);
     if (!object) return undefined;
     const sprite = object.removed ? 'removed' : object.sprite.visible ? 'visible' : 'hidden';
     return { sprite, width: object.width, height: object.height, depth: object.depth, x: object.sprite.x, y: object.sprite.y };
@@ -378,7 +380,8 @@ export class SceneView {
       this.skippedMultRecords.add(record.name);
       return;
     }
-    let object = this.objects.get(record.name);
+    const objectName = target.name;
+    let object = this.objects.get(objectName);
     const alreadyCreated = Boolean(object);
     if (!object) {
       const sprite = new Sprite(Texture.EMPTY);
@@ -386,13 +389,13 @@ export class SceneView {
       sprite.visible = false;
       sprite.zIndex = pixiDepthIndex(target.depth);
       this.world.addChild(sprite);
-      object = { name: record.name, sprite, depth: target.depth, width: 0, height: 0, removed: false, order: this.objectOrder++ };
-      this.objects.set(record.name, object);
+      object = { name: objectName, sprite, depth: target.depth, width: 0, height: 0, removed: false, order: this.objectOrder++ };
+      this.objects.set(objectName, object);
     }
     // >=10000 is an original-engine control value: it bypasses subsequent
     // image-frame updates. It is not a depth coordinate for a far plane.
     if (alreadyCreated && skipsImageFrameUpdate(object.depth)) return;
-    this.rememberMult(record.name, animationName, frame, record);
+    this.rememberMult(objectName, animationName, frame, record);
     // Original external images (-14) are valid frame assignments too; they are
     // preloaded as PNG + hit pixels and must not be mistaken for an empty raster.
     if (resolved.externalPath) {
@@ -400,7 +403,7 @@ export class SceneView {
       if (!ext) {
         object.removed = true; object.sprite.visible = false;
         object.width = 0; object.height = 0; object.hitPixels = undefined;
-        this.traceVisual(record.name, object.sprite, animationName, frame, source);
+        this.traceVisual(objectName, object.sprite, animationName, frame, source);
         return;
       }
       object.removed = false;
@@ -413,13 +416,13 @@ export class SceneView {
         object.sprite.y = this.mask.height / 2 - record.y;
         object.sprite.scale.set(1);
       }
-      this.traceVisual(record.name, object.sprite, animationName, frame, source);
+      this.traceVisual(objectName, object.sprite, animationName, frame, source);
       return;
     }
     if (!resolved.width || !resolved.height || !resolved.bgra) {
       object.removed = true; object.sprite.visible = false;
       object.width = 0; object.height = 0; object.hitPixels = undefined;
-      this.traceVisual(record.name, object.sprite, animationName, frame, source);
+      this.traceVisual(objectName, object.sprite, animationName, frame, source);
       return;
     }
     object.removed = false;
@@ -432,25 +435,26 @@ export class SceneView {
       object.sprite.y = this.mask.height / 2 - record.y;
       object.sprite.scale.set(1);
     }
-    this.traceVisual(record.name, object.sprite, animationName, frame, source);
+    this.traceVisual(objectName, object.sprite, animationName, frame, source);
   }
 
   private applyAnimationFrame(name: string, frame: number, source: UpdateSource, objectFilter?: readonly string[]): void {
-    const allowed = objectFilter ? new Set(objectFilter) : undefined;
+    const allowed = objectFilter ? new Set(objectFilter.map((objectName) => objectName.toUpperCase())) : undefined;
     applyFrameDepthEvents(this.definition.frameDepthEvents, name, frame, (objectName, depth) => {
-      if (!allowed || allowed.has(objectName)) this.setObjectDepth(objectName, depth, { kind: 'fram', detail: `${name} frame ${frame}` });
+      if (!allowed || allowed.has(objectName.toUpperCase())) this.setObjectDepth(objectName, depth, { kind: 'fram', detail: `${name} frame ${frame}` });
     });
     const animation = this.definition.animations.get(name);
     if (!animation) return;
     for (const record of animation.file.frames[frame - 1] ?? []) {
-      if (allowed && !allowed.has(record.name)) continue;
+      if (allowed && !allowed.has(record.name.toUpperCase())) continue;
       this.applyRecord(record, animation.file, name, frame, source);
     }
   }
 
   setObjectDepth(name: string, depth: number, provenance: DepthProvenance = { kind: 'default', detail: 'unspecified' }): void {
-    const stored = setStateDepth(this.state, name, depth, provenance);
-    const object = this.objects.get(name);
+    const target = findNamedObject(this.state.objects.values(), name);
+    const stored = target ? setStateDepth(this.state, target.name, depth, provenance) : setStateDepth(this.state, name, depth, provenance);
+    const object = this.objects.get(stored.name);
     if (object) { object.depth = stored.depth; object.sprite.zIndex = pixiDepthIndex(stored.depth); }
   }
 
@@ -481,7 +485,7 @@ export class SceneView {
 
   /** SCC `Cursor name value` (opcode 0x1f, 0x406593): write the hover cursor ID. */
   private setObjectCursor(name: string, id: number): void {
-    const stored = this.state.objects.get(name);
+    const stored = findNamedObject(this.state.objects.values(), name);
     if (stored) stored.cursorId = id;
     else this.state.objects.set(name, { name, state: 0, depth: 0, cursorId: id });
   }

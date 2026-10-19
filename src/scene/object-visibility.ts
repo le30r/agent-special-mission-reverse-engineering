@@ -1,10 +1,11 @@
 import type { SceneDeclarationKind } from '../navigation/depth-sort';
 import type { SceneImageReference, SceneObjectState, SceneState } from './scene-loader';
+import { findNamedObject } from './object-identity';
 
 export type VisibilityDefinition = {
-  objects: ReadonlyMap<string, unknown>;
-  active: ReadonlyMap<string, unknown>;
-  lights: ReadonlyMap<string, unknown>;
+  objects: ReadonlyMap<string, { name: string }>;
+  active: ReadonlyMap<string, { name: string }>;
+  lights: ReadonlyMap<string, { name: string }>;
 };
 
 export type VisibilityResult = { found: boolean; changed: boolean; clearImage: boolean; kind?: SceneDeclarationKind };
@@ -14,9 +15,9 @@ export type VisibilityResult = { found: boolean; changed: boolean; clearImage: b
  * has no declaration yet and behaves like the base `Object` class.
  */
 export function declarationKind(definition: VisibilityDefinition, name: string): SceneDeclarationKind | undefined {
-  if (definition.active.has(name)) return 'Active';
-  if (definition.lights.has(name)) return 'Light';
-  if (definition.objects.has(name)) return 'Object';
+  if (findNamedObject(definition.active.values(), name)) return 'Active';
+  if (findNamedObject(definition.lights.values(), name)) return 'Light';
+  if (findNamedObject(definition.objects.values(), name)) return 'Object';
   return undefined;
 }
 
@@ -33,12 +34,16 @@ export function applyObjectVisibility(
   name: string,
   visible: boolean,
 ): VisibilityResult {
-  const kind = declarationKind(definition, name);
-  let stored = state.objects.get(name);
+  const active = findNamedObject(definition.active.values(), name);
+  const light = findNamedObject(definition.lights.values(), name);
+  const objectDeclaration = findNamedObject(definition.objects.values(), name);
+  const kind = active ? 'Active' : light ? 'Light' : objectDeclaration ? 'Object' : undefined;
+  const canonicalName = active?.name ?? light?.name ?? objectDeclaration?.name ?? name;
+  let stored = findNamedObject(state.objects.values(), name);
   if (!stored) {
     if (!kind) return { found: false, changed: false, clearImage: false };
-    stored = { name, state: 0, depth: 0, kind, visible: kind === 'Object' ? undefined : false };
-    state.objects.set(name, stored);
+    stored = { name: canonicalName, state: 0, depth: 0, kind, visible: kind === 'Object' ? undefined : false };
+    state.objects.set(canonicalName, stored);
   }
   if (kind === 'Active' || kind === 'Light') {
     const changed = stored.visible !== visible;
