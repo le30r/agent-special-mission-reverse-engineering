@@ -54,13 +54,16 @@ try {
   assert(world.botlState===0&&!world.botlHidden,'unrelated bottle state remains intact');
   assert(await evaluate("document.querySelector('.save-load-toast')?.textContent==='Игра загружена'"),'user-visible success notification shown');
   await waitFor('post-restore export eligibility',async()=>await evaluate('window.__saveLoadDebug.canSave().ok'));
-  await evaluate("(()=>{const click=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download?.endsWith('.json'))window.__saveDownloadFilename=this.download;return click.call(this)}})()");
+  await evaluate("(()=>{const click=HTMLAnchorElement.prototype.click;HTMLAnchorElement.prototype.click=function(){if(this.download?.endsWith('.json'))window.__saveDownloadFilename=this.download;return click.call(this)};const create=URL.createObjectURL.bind(URL);URL.createObjectURL=(blob)=>{if(blob.type==='application/json')window.__saveDownloadTextPromise=blob.text().then(text=>window.__saveDownloadText=text);return create(blob)}})()");
   await fkey('F2');await waitFor('Save UI for file export',async()=>await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"));
   await clickSelector('button','Экспортировать текущее состояние');
   const exportResult=await waitFor('export result message',async()=>await evaluate("document.querySelector('.sl-message,.sl-error')?.textContent||false"),10000);
   assert(exportResult==='Сохранение экспортировано',`UI export succeeded, got ${exportResult}`);
   const filename=await evaluate('window.__saveDownloadFilename'); assert(/^agent-save-level1-\d{4}-\d{2}-\d{2}\.json$/.test(filename),'UI export creates a safe level/date JSON filename');
-  const exportPath=path.join(downloadDir,filename); await writeFile(exportPath,stored,'utf8');
+  const exported=await waitFor('exported JSON Blob payload',async()=>await evaluate('window.__saveDownloadText||false'),10000);
+  const exportedEnvelope=JSON.parse(exported);
+  assert(exportedEnvelope.storageVersion===1&&exportedEnvelope.integrity?.algorithm==='sha256-utf8','download contains the full SaveCodec envelope and digest');
+  const exportPath=path.join(downloadDir,filename); await writeFile(exportPath,exported,'utf8');
   await evaluate("(()=>{for(let i=0;i<6;i++)localStorage.removeItem(`agent-revers.save.v1.slot.${i}`)})()");
   await send('Page.reload',{ignoreCache:true});
   await waitFor('fresh runtime after clearing slots',async()=>await evaluate('Boolean(window.__saveLoadDebug?.canSave().ok)'));
@@ -70,7 +73,7 @@ try {
   await clickSelector('button','Импортировать JSON');
   const documentTree=await send('DOM.getDocument');const fileNode=await send('DOM.querySelector',{nodeId:documentTree.root.nodeId,selector:'input[type="file"]'});
   await send('DOM.setFileInputFiles',{files:[exportPath],nodeId:fileNode.nodeId});
-  await waitFor('file metadata preview',async()=>await evaluate("Boolean(document.querySelector('.sl-file-preview')?.textContent.includes('UI roundtrip'))"),10000);
+  await waitFor('file metadata preview',async()=>await evaluate("Boolean(document.querySelector('.sl-file-preview')?.textContent.includes('Текущее состояние'))"),10000);
   await clickSelector('button','Загрузить этот файл');
   await waitFor('file import restore',async()=>await evaluate("document.querySelector('.save-load-overlay').hidden&&document.querySelector('.save-load-toast')?.textContent==='Игра загружена'"));
   const imported=await evaluate("(()=>({inventory:window.__sccDebug.session.capturePersistentState().inventory,slots:Array.from({length:6},(_,i)=>localStorage.getItem(`agent-revers.save.v1.slot.${i}`))}))()");
