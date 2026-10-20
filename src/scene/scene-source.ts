@@ -1,13 +1,18 @@
 import { Texture } from 'pixi.js';
-import { decodeMult } from '../mult/decoder';
+import { decodeMult, decodeMultIdentityIndex } from '../mult/decoder';
 import {
   buildSceneDefinition,
   normalizeExternalPath,
   type SceneDefinition,
+  type SceneValidationIndex,
 } from './scene-definition';
+import { createSceneValidationIndex } from './scene-definition';
+import { parseFrameDepthEvents, parseSceneDeclarations } from '../navigation/depth-sort';
+import type { PersistentObjectState } from './scene-loader';
 import { decodeMask } from './mask';
 import {
   acquireBackground,
+  createPixiTexture,
   preloadExternalTextures,
   releaseBackground,
   releaseExternalTextures,
@@ -77,6 +82,11 @@ export type SceneResourceReader = {
   text(url: string): Promise<string>;
   bytes(url: string): Promise<ArrayBuffer>;
 };
+export type SceneLoadTimings = { sceneFetchMs: number; alternateMaskDecodeMs: number; multFetchDecodeMs: number; maskDecodeMs: number; definitionBuildMs: number; externalTextureMs: number; backgroundTextureMs: number };
+
+type AssetLease = { scene: { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrl: string } };
+type SharedAssetCache = Map<number, { promise: Promise<AssetLease>; refs: number }>;
+type SharedProviderState = { assets: SharedAssetCache; validationIndices: Map<number, SceneValidationIndex> };
 
 export class SceneLoadError extends Error {
   readonly scene: number;
@@ -161,26 +171,47 @@ export async function loadSceneDefinition(
   audioResources: Readonly<Record<string, string>> = {},
   audioDurations: Readonly<Record<string, number>> = {},
   audioStorageModes: Readonly<Record<string, 'sharedPcm' | 'privateDecoded'>> = {},
+  onTimings?: (timings: SceneLoadTimings) => void,
 ): Promise<SceneDefinition> {
+  const timings: SceneLoadTimings = zeroLoadTimings();
   const requiredReasons = entry.missing.required.map((missing) => missing.message);
   if (!entry.loadable || requiredReasons.length) throw new SceneLoadError(entry.id, requiredReasons);
   if (!entry.mask) throw new SceneLoadError(entry.id, ['mask is not prepared']);
   const required = new Set(entry.requiredAnimations);
   const maskEntries = Object.entries(entry.masks ?? {});
+  let phaseStart = performance.now();
   const [scc, includeSources, maskBytes, alternateMaskBytes] = await Promise.all([
     reader.text(entry.scc),
     Promise.all(entry.includes.map((url) => reader.text(url))),
     reader.bytes(entry.mask),
     Promise.all(maskEntries.map(([, url]) => reader.bytes(url))),
   ]);
+  timings.sceneFetchMs = performance.now() - phaseStart;
+  phaseStart = performance.now();
   const masks = new Map(maskEntries.map(([path], index) => [path, decodeMask(alternateMaskBytes[index])]));
+  timings.alternateMaskDecodeMs = performance.now() - phaseStart;
   const mults = new Map<string, ReturnType<typeof decodeMult>>();
   const warnings: string[] = [];
-  for (const [name, url] of Object.entries(entry.animations)) {
-    try {
-      mults.set(name, decodeMult(await reader.bytes(url)));
-    } catch (error) {
-      const message = `Animation ${name} (${url}) is unavailable: ${String(error)}`;
+  const animationEntries = Object.entries(entry.animations);
+  const animationResults: Array<{ decoded?: ReturnType<typeof decodeMult>; error?: unknown } | undefined> = new Array(animationEntries.length);
+  let nextAnimation = 0;
+  phaseStart = performance.now();
+  await Promise.all(Array.from({ length: Math.min(4, animationEntries.length) }, async () => {
+    for (;;) {
+      const index = nextAnimation++;
+      if (index >= animationEntries.length) return;
+      const [, url] = animationEntries[index];
+      try { animationResults[index] = { decoded: decodeMult(await reader.bytes(url)) }; }
+      catch (error) { animationResults[index] = { error }; }
+    }
+  }));
+  timings.multFetchDecodeMs = performance.now() - phaseStart;
+  for (let index = 0; index < animationEntries.length; index++) {
+    const [name, url] = animationEntries[index];
+    const result = animationResults[index]!;
+    if (result.decoded) mults.set(name, result.decoded);
+    else {
+      const message = `Animation ${name} (${url}) is unavailable: ${String(result.error)}`;
       if (required.has(name)) throw new SceneLoadError(entry.id, [message]);
       warnings.push(message);
     }
@@ -188,13 +219,17 @@ export async function loadSceneDefinition(
   for (const name of required) {
     if (!mults.has(name)) throw new SceneLoadError(entry.id, [`Required animation ${name} is not prepared`]);
   }
+  phaseStart = performance.now();
+  const decodedMask = decodeMask(maskBytes);
+  timings.maskDecodeMs = performance.now() - phaseStart;
+  phaseStart = performance.now();
   const definition = buildSceneDefinition({
     id: entry.id,
     sccUrl: entry.scc,
     scc,
     includeSources,
     background: entry.background ?? '',
-    mask: decodeMask(maskBytes),
+    mask: decodedMask,
     masks,
     mults,
     externalImages: entry.externalImages,
@@ -203,7 +238,9 @@ export async function loadSceneDefinition(
     audioDurations,
     audioStorageModes,
   });
+  timings.definitionBuildMs = performance.now() - phaseStart;
   definition.warnings.push(...warnings);
+  onTimings?.(timings);
   return definition;
 }
 
@@ -212,7 +249,7 @@ export async function loadSceneBackground(url: string): Promise<Texture> {
   const image = new Image();
   image.src = url;
   await image.decode();
-  return Texture.from(image);
+  return createPixiTexture(image);
 }
 
 /**
@@ -226,45 +263,137 @@ export class SceneAssetProvider implements SceneProvider {
   readonly ids: number[];
   readonly contentId: string;
   private readonly byId: Map<number, SceneManifestEntry>;
-  private readonly loaded = new Map<number, { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrl: string }>();
+  private readonly loaded = new Map<number, { promise: Promise<AssetLease>; refs: number }>();
+  private readonly shared: SharedProviderState;
+  lastLoadResourceTimings: SceneLoadTimings = zeroLoadTimings();
+  lastValidationResourceTimings: SceneLoadTimings = zeroLoadTimings();
 
-  constructor(manifest: SceneManifest, reader: SceneResourceReader = fetchSceneReader) {
+  constructor(manifest: SceneManifest, reader: SceneResourceReader = fetchSceneReader, shared?: SharedProviderState) {
     this.manifest = manifest;
     this.reader = reader;
     this.byId = new Map(manifest.scenes.map((scene) => [scene.id, scene]));
     this.ids = [...this.byId.keys()].sort((a, b) => a - b);
     this.contentId = manifest.contentId ?? saveContentHash(JSON.stringify({ version:manifest.version, scenes:manifest.scenes }));
+    this.shared = shared ?? { assets: new Map(), validationIndices: new Map() };
   }
 
-  /** A detached cache namespace is required for transactional same-scene restore. */
-  fork(): SceneProvider { return new SceneAssetProvider(this.manifest, this.reader); }
+  /** Candidate visits lease immutable assets while the active visit remains their owner. */
+  fork(): SceneProvider { return new SceneAssetProvider(this.manifest, this.reader, this.shared); }
 
   has(id: number): boolean { return this.byId.has(id); }
   /** Number of scene resource sets currently retained (should be 0 or 1). */
   get loadedCount(): number { return this.loaded.size; }
+  get resourceCacheStats(): { providerLeases: number; sharedScenes: number; sharedLeaseRefs: number; validationIndexes: number } {
+    return {
+      providerLeases: this.loaded.size,
+      sharedScenes: this.shared.assets.size,
+      sharedLeaseRefs: [...this.shared.assets.values()].reduce((sum, entry) => sum + entry.refs, 0),
+      validationIndexes: this.shared.validationIndices.size,
+    };
+  }
 
   async load(id: number): Promise<LoadedScene> {
     const entry = this.byId.get(id);
     if (!entry) throw new SceneLoadError(id, ['scene is not present in the prepared manifest']);
-    if (this.loaded.has(id)) return this.loaded.get(id)!;
-    const definition = await loadSceneDefinition(entry, this.reader, this.manifest.audioResources, this.manifest.audioDurations, this.manifest.audioStorageModes);
-    const external = collectAnimationExternalImages(definition);
-    if (external.missing.length) definition.warnings.push(`External images missing from the manifest: ${external.missing.join(', ')}`);
-    const failedExternal = await preloadExternalTextures(external.urls);
-    if (failedExternal.length) definition.warnings.push(`External images failed to load: ${failedExternal.join(', ')}`);
-    const backgroundUrl = entry.background;
-    if (!backgroundUrl) {
-      releaseExternalTextures(external.urls);
-      throw new SceneLoadError(id, ['background is not prepared']);
+    const own = this.loaded.get(id);
+    if (own) return (await own.promise).scene;
+    let lease = this.shared.assets.get(id);
+    if (lease) { lease.refs++; this.lastLoadResourceTimings = zeroLoadTimings(); }
+    else {
+      const promise = (async (): Promise<AssetLease> => {
+        let externalUrls: string[] = [];
+        try {
+          const definition = await loadSceneDefinition(entry, this.reader, this.manifest.audioResources, this.manifest.audioDurations, this.manifest.audioStorageModes, timings => { this.lastLoadResourceTimings = timings; });
+          const external = collectAnimationExternalImages(definition);
+          externalUrls = external.urls;
+          if (external.missing.length) definition.warnings.push(`External images missing from the manifest: ${external.missing.join(', ')}`);
+          let resourceStart = performance.now();
+          const failedExternal = await preloadExternalTextures(external.urls);
+          this.lastLoadResourceTimings.externalTextureMs = performance.now() - resourceStart;
+          if (failedExternal.length) definition.warnings.push(`External images failed to load: ${failedExternal.join(', ')}`);
+          const backgroundUrl = entry.background;
+          if (!backgroundUrl) throw new SceneLoadError(id, ['background is not prepared']);
+          resourceStart = performance.now();
+          const background = await acquireBackground(backgroundUrl, loadSceneBackground);
+          this.lastLoadResourceTimings.backgroundTextureMs = performance.now() - resourceStart;
+          return { scene: { definition, background, externalUrls, backgroundUrl } };
+        } catch (error) {
+          if (externalUrls.length) releaseExternalTextures(externalUrls);
+          throw error;
+        }
+      })();
+      lease = { promise, refs: 1 };
+      this.shared.assets.set(id, lease);
+      void promise.catch(() => { if (this.shared.assets.get(id) === lease) this.shared.assets.delete(id); });
     }
-    try {
-      const background = await acquireBackground(backgroundUrl, loadSceneBackground);
-      const record = { definition, background, externalUrls: external.urls, backgroundUrl };
-      this.loaded.set(id, record);
-      return record;
-    } catch (error) {
-      releaseExternalTextures(external.urls);
+    this.loaded.set(id, lease);
+    try { return (await lease.promise).scene; }
+    catch (error) {
+      if (this.loaded.get(id) === lease) this.loaded.delete(id);
+      lease.refs--;
+      if (lease.refs <= 0 && this.shared.assets.get(id) === lease) this.shared.assets.delete(id);
       throw error;
+    }
+  }
+
+  /** Save identity checks use compact SCC/MULT metadata, never render resources. */
+  async loadDefinitionForValidation(id: number, objects: readonly PersistentObjectState[]): Promise<SceneValidationIndex> {
+    const start = performance.now();
+    this.lastValidationResourceTimings = zeroLoadTimings();
+    let index = this.shared.validationIndices.get(id);
+    const active = this.loaded.get(id);
+    if (!index && active) index = createSceneValidationIndex((await active.promise).scene.definition);
+    const entry = this.byId.get(id);
+    if (!entry) throw new SceneLoadError(id, ['scene is not present in the prepared manifest']);
+    if (!index) {
+      const requiredReasons = entry.missing.required.map(missing => missing.message);
+      if (!entry.loadable || requiredReasons.length) throw new SceneLoadError(id, requiredReasons);
+      if (!entry.mask) throw new SceneLoadError(id, ['mask is not prepared']);
+      const [scc, includes] = await Promise.all([this.reader.text(entry.scc), Promise.all(entry.includes.map(url => this.reader.text(url)))]);
+      const declarationSource = [...includes, scc].join('\n');
+      const declarations = parseSceneDeclarations(declarationSource);
+      index = {
+        id, scc,
+        objectNames: new Set([...declarations.objects.keys()].map(name => name.toUpperCase())),
+        activeNames: new Set([...declarations.active.keys()].map(name => name.toUpperCase())),
+        lightNames: new Set([...declarations.lights.keys()].map(name => name.toUpperCase())),
+        frameDepthEvents: parseFrameDepthEvents(declarationSource).map(({ animation, frame, objectName }) => ({ animation, frame, objectName })),
+        animations: new Map(),
+      };
+    }
+    this.lastValidationResourceTimings.sceneFetchMs += performance.now() - start;
+    const animationData = new Map(index.animations);
+    const recordsNeeded = new Set(objects.filter(item => !item.placeholder && item.image.kind === 'mult').map(item => item.image.kind === 'mult' ? item.image.reference.file : ''));
+    const frameCountsNeeded = new Set(index.frameDepthEvents.map(event => event.animation));
+    const animationNames = new Set([...recordsNeeded, ...frameCountsNeeded]);
+    for (const name of animationNames) {
+      const existing = animationData.get(name);
+      const needsRecords = recordsNeeded.has(name);
+      if (existing && (!needsRecords || existing.frames)) continue;
+      const url = entry.animations[name];
+      if (!url) continue;
+      const phaseStart = performance.now();
+      try {
+        const bytes = await this.reader.bytes(url);
+        const decoded = decodeMultIdentityIndex(bytes, needsRecords);
+        animationData.set(name, { frameCount: decoded.frameCount, ...(needsRecords ? { frames: decoded.frames } : {}) });
+      } catch (error) {
+        if (entry.requiredAnimations.includes(name)) throw new SceneLoadError(id, [`Animation ${name} (${url}) is unavailable: ${String(error)}`]);
+      }
+      this.lastValidationResourceTimings.multFetchDecodeMs += performance.now() - phaseStart;
+    }
+    index = { ...index, animations: animationData };
+    this.cacheValidationIndex(id, index);
+    return index;
+  }
+
+  private cacheValidationIndex(id: number, index: SceneValidationIndex): void {
+    this.shared.validationIndices.delete(id);
+    this.shared.validationIndices.set(id, index);
+    while (this.shared.validationIndices.size > 32) {
+      const oldest = this.shared.validationIndices.keys().next().value;
+      if (oldest === undefined) break;
+      this.shared.validationIndices.delete(oldest);
     }
   }
 
@@ -272,11 +401,18 @@ export class SceneAssetProvider implements SceneProvider {
     const record = this.loaded.get(id);
     if (!record) return;
     this.loaded.delete(id);
-    releaseBackground(record.backgroundUrl);
-    releaseExternalTextures(record.externalUrls);
-    for (const animation of record.definition.animations.values()) releaseMultTextures(animation.file);
+    record.refs--;
+    if (record.refs > 0) return;
+    if (this.shared.assets.get(id) === record) this.shared.assets.delete(id);
+    void record.promise.then(({ scene }) => {
+      releaseBackground(scene.backgroundUrl);
+      releaseExternalTextures(scene.externalUrls);
+      for (const animation of scene.definition.animations.values()) releaseMultTextures(animation.file);
+    });
   }
 }
+
+function zeroLoadTimings(): SceneLoadTimings { return { sceneFetchMs: 0, alternateMaskDecodeMs: 0, multFetchDecodeMs: 0, maskDecodeMs: 0, definitionBuildMs: 0, externalTextureMs: 0, backgroundTextureMs: 0 }; }
 
 /** Loads the manifest and the original inventory UI; scene data stays lazy. */
 export async function loadSceneCatalog(resources = '/resources'): Promise<SceneCatalog> {

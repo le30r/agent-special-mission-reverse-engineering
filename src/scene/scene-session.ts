@@ -1,12 +1,13 @@
 import type { Container, Texture } from 'pixi.js';
-import { SceneLoader, createSceneRuntime, type SceneState, type PersistentWorldSnapshot } from './scene-loader';
-import type { SceneDefinition } from './scene-definition';
+import { SceneLoader, createSceneRuntime, type SceneState, type PersistentWorldSnapshot, type PersistentObjectState } from './scene-loader';
+import { createSceneValidationIndex, type SceneDefinition, type SceneValidationIndex } from './scene-definition';
 import { computeEntry, type SceneEntry } from './scene-entry';
 import { SceneView, type SceneViewHooks } from './scene-view';
 import type { BrowserAudioBackend } from '../audio/backend';
 import { SaveCodec, type GameSaveV1, type Result, type SaveEligibility } from './save-codec';
 import { saveContentHash } from './save-codec';
 import { parseObjectCreationIdentities } from '../scc/runtime';
+import { pixiTextureDiagnostics, resetPixiTextureDiagnostics } from './textures';
 
 /** Resources prepared for one scene visit; released when the scene is left. */
 export type LoadedScene = { definition: SceneDefinition; background: Texture };
@@ -19,6 +20,8 @@ export type SceneProvider = {
   readonly ids: readonly number[];
   has(id: number): boolean;
   load(id: number): LoadedScene | Promise<LoadedScene>;
+  /** Definition-only path used for save identity validation of non-active visits. */
+  loadDefinitionForValidation?(id: number, objects: readonly PersistentObjectState[]): SceneValidationIndex | Promise<SceneValidationIndex>;
   release?(id: number, scene: LoadedScene): void;
   /** Independent resource ownership for transactional candidate visits. */
   fork?(): SceneProvider;
@@ -127,6 +130,8 @@ export class SceneSession {
   private loadToken = 0;
   private restoring = false;
   private postTick = false;
+  /** Last transactional restore phase timings, used by the save-load benchmark/debug panel. */
+  lastRestoreDiagnostics?: { scene: number; phases: Record<string, number>; totalMs: number; failed?: string };
 
   constructor(
     stage: Container,
@@ -194,8 +199,24 @@ export class SceneSession {
 
   /** Prepare a detached candidate; only after it is render-ready do we invalidate and swap visits. */
   async importSave(save: GameSaveV1): Promise<Result<void>> {
+    const startedAt = performance.now();
+    const phases: Record<string, number> = {};
+    resetPixiTextureDiagnostics();
+    let phaseStartedAt = startedAt;
+    const mark = (name: string) => { const now = performance.now(); phases[name] = now - phaseStartedAt; phaseStartedAt = now; };
+    const addResourceTimings = (value?: Record<string, number>) => {
+      if (!value) return;
+      for (const [name, duration] of Object.entries(value)) phases[`resource.${name}`] = (phases[`resource.${name}`] ?? 0) + duration;
+    };
+    const finish = (failed?: string) => {
+      const textures = pixiTextureDiagnostics();
+      phases.pixiTextureCreateMs = textures.createMs;
+      phases.pixiTextureCount = textures.count;
+      this.lastRestoreDiagnostics = { scene: save.world.activeLevel, phases: { ...phases }, totalMs: performance.now() - startedAt, ...(failed ? { failed } : {}) };
+    };
     if (this.restoring) return {ok:false,error:{code:'Busy',message:'another restore is already in progress'}};
     const checked=SaveCodec.validate(save,{contentId:this.provider.contentId,sceneIds:this.supportedScenes});
+    mark('validation');
     if (!checked.ok) return checked;
     const candidateProvider=this.provider.fork?.();
     if (!candidateProvider) return {ok:false,error:{code:'RestoreFailed',message:'provider does not support isolated resource ownership'}};
@@ -204,45 +225,58 @@ export class SceneSession {
     let candidateView: SceneView | undefined;
     const candidateLoader=new SceneLoader(()=>candidateView?.scc.cancelActive());
     candidateLoader.restorePersistentState(save.world);
+    mark('visitedStateRestore');
     let candidateScene: LoadedScene | undefined;
     let committed=false;
     try {
       candidateScene=await candidateProvider.load(save.world.activeLevel);
+      addResourceTimings((candidateProvider as SceneProvider & { lastLoadResourceTimings?: Record<string, number> }).lastLoadResourceTimings);
+      mark('activeSceneResources');
       if(token!==this.loadToken) throw new Error('restore superseded');
       const savedScene=save.world.scenes.find(scene=>scene.id===save.world.activeLevel)!;
       if((save.world.hero?.mode ?? 'navigation')==='navigation'&&!candidateScene.definition.animations.has('Stop0')) throw Object.assign(new Error('Active scene has no Stop0 hero pose'),{code:'IncompatibleSave'});
-      const validateSceneResources=(sceneId:number, definition:SceneDefinition) => {
+      const validateSceneResources=(sceneId:number, definition:SceneValidationIndex) => {
         const saved=save.world.scenes.find(scene=>scene.id===sceneId)!;
         const dynamicObjects=new Set(parseObjectCreationIdentities(definition.scc));
         // Fram depth hooks call the same create-if-missing host as Objzet.
         for(const event of definition.frameDepthEvents) {
           const animation=definition.animations.get(event.animation);
-          if(animation && event.frame>=1 && event.frame<=animation.file.frameCount) dynamicObjects.add(event.objectName.toUpperCase());
+          if(animation && event.frame>=1 && event.frame<=animation.frameCount) dynamicObjects.add(event.objectName.toUpperCase());
         }
-        const declaredNames=new Set([...definition.objects.keys(), ...definition.active.keys(), ...definition.lights.keys()].map(name=>name.toUpperCase()));
         for(const item of saved.objects) if(!item.placeholder) {
           // Omitted kind is the V1 default Object, not a validation bypass.
           const kind=item.kind ?? 'Object';
-          const declared=kind==='Active'?definition.active:kind==='Light'?definition.lights:definition.objects;
           const name=item.name.toUpperCase();
-          const known=[...declared.keys()].some(key=>key.toUpperCase()===name)
-            || (kind==='Object' && !declaredNames.has(name) && dynamicObjects.has(name));
+          const declared=kind==='Active'?definition.activeNames:kind==='Light'?definition.lightNames:definition.objectNames;
+          const declaredAnywhere=definition.objectNames.has(name)||definition.activeNames.has(name)||definition.lightNames.has(name);
+          const known=declared.has(name) || (kind==='Object' && !declaredAnywhere && dynamicObjects.has(name));
           if(!known) throw Object.assign(new Error(`Unknown ${kind} identity ${item.name} in scene ${sceneId}`),{code:'IncompatibleSave'});
           if(item.image.kind!=='mult') continue;
           const reference=item.image.reference;
           const animation=definition.animations.get(reference.file);
-          const record=animation?.file.frames[reference.frame-1]?.find(value=>value.slot===reference.slot&&value.child===reference.child);
-          if(!record || record.name.toUpperCase()!==item.name.toUpperCase()) throw Object.assign(new Error(`Invalid MULT identity ${item.name} in scene ${sceneId}`),{code:'IncompatibleSave'});
+          const recordName=reference.slot===reference.frame ? animation?.frames?.[reference.frame-1]?.[reference.child] : undefined;
+          if(!recordName || recordName.toUpperCase()!==item.name.toUpperCase()) throw Object.assign(new Error(`Invalid MULT identity ${item.name} in scene ${sceneId}`),{code:'IncompatibleSave'});
         }
       };
       // Validate every visited scene's real Animation → Frame → Slot → Child → Object chain.
-      validateSceneResources(save.world.activeLevel,candidateScene.definition);
+      const activeValidationIndex=candidateProvider.loadDefinitionForValidation
+        ? await candidateProvider.loadDefinitionForValidation(save.world.activeLevel,savedScene.objects)
+        : createSceneValidationIndex(candidateScene.definition);
+      addResourceTimings((candidateProvider as SceneProvider & { lastValidationResourceTimings?: Record<string, number> }).lastValidationResourceTimings);
+      validateSceneResources(save.world.activeLevel,activeValidationIndex);
       for(const saved of save.world.scenes) if(saved.initialized && saved.id!==save.world.activeLevel) {
-        const loaded=await candidateProvider.load(saved.id);
-        try { validateSceneResources(saved.id,loaded.definition); }
-        finally { candidateProvider.release?.(saved.id,loaded); }
+        if(candidateProvider.loadDefinitionForValidation) {
+          const index=await candidateProvider.loadDefinitionForValidation(saved.id,saved.objects);
+          addResourceTimings((candidateProvider as SceneProvider & { lastValidationResourceTimings?: Record<string, number> }).lastValidationResourceTimings);
+          validateSceneResources(saved.id,index);
+        } else {
+          const loaded=await candidateProvider.load(saved.id);
+          try { validateSceneResources(saved.id,createSceneValidationIndex(loaded.definition)); }
+          finally { candidateProvider.release?.(saved.id,loaded); }
+        }
         if(token!==this.loadToken) throw new Error('restore superseded');
       }
+      mark('visitedSceneValidationResources');
       const state=candidateLoader.state(save.world.activeLevel);
       state.portals=candidateScene.definition.portals; state.focus=[...candidateScene.definition.focus];
       declareSceneObjects(candidateLoader,state,candidateScene.definition);
@@ -254,6 +288,7 @@ export class SceneSession {
       };
       candidateView=this.options.createView?.(candidateScene.definition,state,candidateScene.background,hooks,candidateLoader.inventory)
         ?? new SceneView(candidateScene.definition,state,candidateScene.background,hooks,candidateLoader.inventory,this.options.audioBackend);
+      mark('sceneViewCreation');
       candidateLoader.active=state;
       const candidateRuntime=createSceneRuntime(save.world.activeLevel);
       candidateRuntime.resources.add({destroy:()=>candidateView?.dispose()});
@@ -261,6 +296,7 @@ export class SceneSession {
       const savedHeroObject=savedScene.objects.find(item=>item.name.toUpperCase()==='MAINHERO');
       const heroImage=savedHeroObject?.image.kind==='mult'?savedHeroObject.image.reference:undefined;
       candidateView.restoreHero(save.world.hero?.mode ?? 'navigation', save.world.hero?.position ?? savedScene.savedPosition, save.world.hero?.transform, heroImage);
+      mark('objectAndHeroRestore');
       if(token!==this.loadToken) throw new Error('restore superseded');
       // Atomic commit starts here. The candidate is complete and has its own provider lease.
       const oldView=this.view, oldLoaded=this.loaded, oldProvider=this.provider, oldLoader=this.loaderValue, oldHadRuntime=Boolean(this.loaderValue.runtime);
@@ -277,10 +313,12 @@ export class SceneSession {
       if(oldView && !oldHadRuntime) oldView.dispose();
       if(oldLoaded) oldProvider.release?.(oldLoaded.id,oldLoaded.scene);
       candidateView.dispatchStart();
+      mark('startDispatch');
       this.options.onRestoreCommit?.(candidateLoader.inventory);
       this.transitionLog.push(`restore->${save.world.activeLevel}`);
       this.loadError=undefined;
       this.postTick=false;
+      finish();
       return {ok:true,value:undefined};
     } catch(error) {
       if(!committed) {
@@ -288,6 +326,7 @@ export class SceneSession {
         if(candidateScene) candidateProvider.release?.(save.world.activeLevel,candidateScene);
       }
       const code=(error as {code?:string})?.code;
+      finish(error instanceof Error ? error.message : String(error));
       return {ok:false,error:{code:committed?'RestoreFailed':code==='IncompatibleSave'?'IncompatibleSave':'ResourceLoadFailed',message:error instanceof Error?error.message:String(error),cause:error}};
     } finally { this.restoring=false; }
   }

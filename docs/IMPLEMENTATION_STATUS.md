@@ -240,6 +240,10 @@ pnpm catalog:report
 
 21 новая unit-регрессия проверяет настоящий runtime → export → codec → restore roundtrip для State/Cursor/Objzet/Fram, сохранение State без повторного Init, регистр/default kind, неактивные посещённые сцены и отклонение посторонних имён, подмены типа, identity другой сцены, неверных MULT и неисполняемых Fram. В общий Chromium runner добавлены Save/Load Core, UI и отдельная State identity регрессия с опциональным импортом исходных пользовательских файлов. Подробности и результаты: [STATE_OBJECT_IDENTITIES](../research/save-load/STATE_OBJECT_IDENTITIES.md).
 
+## Save/Load performance — research/save-load-performance
+
+Оптимизирован `SceneSession.importSave()` без изменения формата сейва и lifecycle: неактивные посещённые сцены валидируются компактным SCC/MULT identity index без декодирования графики; candidate provider делит неизменяемые resource leases с активной сессией с ref-count владением. На пользовательских Level24/Level29 cold `importSave` сократился примерно с 20.05/19.63 s до 1.75/0.68 s; warm повтор — 6.0/2.75 ms. Level24 дополнительно ждёт около 1.4 s после возврата `importSave` из-за оригинальной StartW-анимации. Benchmark, фазовые замеры, ограничения identity-only проверки и измерения: [SAVE_LOAD_PERFORMANCE](../research/save-load/SAVE_LOAD_PERFORMANCE.md). Финальные проверки фиксируются в этой записи после полного прогона.
+
 **Проверки:** полный unit-набор с двумя workers — 24 файла / 214 тестов; `pnpm build` — passed; полный Chromium E2E — 13/13, каталог 47/47. Оба исходных файла `agent-save-level24-2026-10-19.json` и `agent-save-level29-2026-10-19.json` загружены через реальный UI импорта: активный уровень, точный inventory и динамическое состояние восстановлены; SHA-256 каждого исходного файла до/после совпадает. SCC, contentId и формат V1 не изменены. Ветка от локального `master` (`bd00847`), merge не выполнялся.
 
 ## Hitbox Debugger — feature/hitbox-debugger

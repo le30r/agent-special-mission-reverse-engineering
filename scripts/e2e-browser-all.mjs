@@ -27,6 +27,7 @@ function runE2e(script, pageUrl, artifacts) {
   return new Promise((resolve, reject) => {
     const child = start(process.execPath, [path.join(root, 'scripts', script)], {
       env: { ...process.env, E2E_CDP: `http://127.0.0.1:${cdpPort}`, E2E_URL: pageUrl, E2E_TEMP_PARENT: artifacts,
+        ...(script === 'e2e-browser-save-load-performance.mjs' && process.argv.slice(3).includes('--level29') ? { SAVE_FILES: '/Users/le30r/Downloads/agent-save-level29-2026-10-19.json' } : {}),
         E2E_OUTPUT_DIR: process.env.E2E_OUTPUT_DIR ?? path.join(artifacts, 'output'),
         E2E_SCREENSHOT_DIR: process.env.E2E_SCREENSHOT_DIR ?? path.join(artifacts, 'screens'),
         E2E_EVIDENCE_DIR: process.env.E2E_EVIDENCE_DIR ?? path.join(artifacts, 'evidence') },
@@ -85,7 +86,7 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
-  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-save-state-identities.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs']);
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-save-state-identities.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs', 'e2e-browser-save-load-performance.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
   if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
   const single = process.argv[2] && standalone.has(startAt);

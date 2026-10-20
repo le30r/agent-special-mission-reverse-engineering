@@ -7,7 +7,7 @@ import {
   normalizeOriginalPath,
   scanMultExternalPaths,
 } from '../src/scene/scene-discovery';
-import { collectAnimationExternalImages, loadSceneDefinition } from '../src/scene/scene-source';
+import { collectAnimationExternalImages, loadSceneDefinition, SceneAssetProvider } from '../src/scene/scene-source';
 import { buildRoute, correctPosition, sample } from '../src/navigation/router';
 import { catalogDefinition, catalogEntry, fileSceneReader, loadTestSceneCatalog } from './helpers/scene-catalog';
 
@@ -174,6 +174,29 @@ describe('automatic scene discovery', () => {
     expect(new Set(requestedBytes)).toEqual(new Set([entry.mask!, ...Object.values(entry.masks ?? {}), ...Object.values(entry.animations)]));
     expect(requestedText).not.toContain('/resources/Level39.scc');
     expect(requestedBytes).not.toContain('/resources/Level39.scc');
+  }, 30000);
+
+  it('caches compact save identity indexes across transactional provider forks without retaining render resources', async () => {
+    const catalog = await loadTestSceneCatalog([1]);
+    const entry = catalogEntry(catalog, 1);
+    const manifest = { ...catalog.manifest, scenes: [entry] };
+    const requestedBytes: string[] = [];
+    const reader = { text: fileSceneReader.text, bytes: async (url: string) => { requestedBytes.push(url); return await fileSceneReader.bytes(url); } };
+    const provider = new SceneAssetProvider(manifest, reader);
+    const fullDefinition = await loadSceneDefinition(entry, fileSceneReader);
+    const animation = [...fullDefinition.animations.values()].find(value => value.file.frames.some(frame => frame.length > 0))!;
+    const record = animation.file.frames.find(frame => frame.length > 0)![0];
+    const savedObjects = [{ placeholder: false, image: { kind: 'mult', reference: { file: animation.name, frame: record.slot, slot: record.slot, child: record.child } } }] as never;
+    const first = await provider.loadDefinitionForValidation(1, savedObjects);
+    expect(first.animations.size).toBeGreaterThan(0);
+    expect(first.animations.get(animation.name)?.frames?.[record.slot - 1]?.[record.child]).toBe(record.name);
+    expect(provider.loadedCount).toBe(0);
+    expect(requestedBytes).not.toContain(entry.mask);
+    expect(requestedBytes.length).toBeLessThan(Object.keys(entry.animations).length);
+
+    const fork = provider.fork() as SceneAssetProvider;
+    expect(await fork.loadDefinitionForValidation(1, savedObjects)).toEqual(first);
+    expect(fork.loadedCount).toBe(0);
   }, 30000);
 
   it('maps every animation external path to a prepared URL for Level1', async () => {
