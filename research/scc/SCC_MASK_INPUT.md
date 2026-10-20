@@ -145,6 +145,28 @@ inventory removal and hotspot hiding, plus hidden/behind blocker cases. Movement
 animation startup and position rendering are stubbed; this is a runtime
 regression test, not browser visual or animation-completion evidence.
 
+## Browser Mainhero item targeting
+
+`Mainhero` is rendered separately from the base Object sprite map, but must still
+participate in the base Object hit phase. `SceneView` retains the current hero
+MULT alpha mask and inserts a Mainhero target into the same depth-sorted list
+used for clicks and hitbox diagnostics. The target uses live hero visibility,
+mask-derived depth, anchor, scale and position; screen-to-world scroll conversion
+remains shared with ordinary Object hits. Pixel lookup maps scaled world geometry
+back to the unscaled raster. Transparent pixels and zero-scale targets miss.
+
+This fixes self-use handlers such as Level30's `Click 21 Mainhero Pm`, Case 3:
+item 21 (gas mask) is applied to the hero after giving item 23 to Pm. Successful
+execution runs `K_protivogaz`, sets Pm state 4 and removes item 21. No new SCC
+handler, progression bypass or save migration is introduced. Active rectangles
+still precede this base Object phase as described above.
+
+`tests/scene-hero-hit.test.ts` loads Level30 and verifies the real handler at two
+hero scales with nonzero scroll, rejects transparent/hidden/wrong-state clicks,
+and checks overlap priority against base Objects in front of/behind the hero.
+Canvas texture creation, navigation and animation execution are stubbed; these
+are runtime routing tests rather than browser visual evidence.
+
 ## Block / Ublock
 
 **Command / Syntax:** `Block` and `Ublock`; **no arguments or identifier**.

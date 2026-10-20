@@ -9,6 +9,7 @@
 export type HitTarget = {
   x: number; y: number; width: number; height: number;
   visible: boolean; removed: boolean; hitPixels?: Uint8ClampedArray;
+  scaleX?: number; scaleY?: number;
 };
 
 /**
@@ -23,8 +24,10 @@ export function hitRejectionReason(target: HitTarget, x: number, y: number): str
   if (!target.visible) return 'hidden';
   if (target.removed) return 'removed';
   if (!target.hitPixels) return 'no hit image';
-  const ix = Math.floor(x - (target.x - target.width / 2));
-  const iy = Math.floor(y - (target.y - target.height / 2));
+  const scaleX = target.scaleX ?? 1, scaleY = target.scaleY ?? 1;
+  if (scaleX === 0 || scaleY === 0) return 'outside image bounds';
+  const ix = Math.floor((x - target.x) / scaleX + target.width / 2);
+  const iy = Math.floor((y - target.y) / scaleY + target.height / 2);
   if (ix < 0 || iy < 0 || ix >= target.width || iy >= target.height) return 'outside image bounds';
   if (target.hitPixels[(iy * target.width + ix) * 4 + 3] === 0) return 'transparent pixel';
   return undefined;

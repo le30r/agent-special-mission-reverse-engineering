@@ -66,6 +66,7 @@ export class SceneView {
   private objectOrder = 0;
   private movement?: Movement;
   private heroIsObjectSpace = false;
+  private heroHitImage?: { width: number; height: number; hitPixels: Uint8ClampedArray };
   private tickNumber = 0;
   private readonly audio: SccAudioRuntime;
   private readonly latchedSounds = new Set<number>();
@@ -463,6 +464,9 @@ export class SceneView {
     if (record.name === 'Mainhero') {
       // A frame event re-assigns the image name, which also restores a hidden hero.
       this.rememberMult('Mainhero', animationName, frame, record);
+      this.heroHitImage = resolved.width && resolved.height && resolved.bgra
+        ? { width: resolved.width, height: resolved.height, hitPixels: multHitPixels(resolved) }
+        : undefined;
       if (!resolved.width || !resolved.height || !resolved.bgra) { this.hero.visible = false; this.traceVisual('Mainhero', this.hero, animationName, frame, source); return; }
       this.hero.texture = resolvedTexture(file, frame, record, resolved);
       this.hero.visible = true;
@@ -782,12 +786,7 @@ export class SceneView {
     const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
     // Every declared/runtime base Object participates, exactly like the original
     // reverse painter-order loop. There is no per-object interaction whitelist.
-    const target = firstHitTarget([...this.objects.values()].map((object) => ({
-      name: object.name,
-      x: object.sprite.x, y: object.sprite.y, width: object.width, height: object.height,
-      visible: object.sprite.visible, removed: object.removed, hitPixels: object.hitPixels,
-      depth: object.depth, order: object.order,
-    })), worldX, worldY);
+    const target = firstHitTarget(this.hitboxObjectTargets(), worldX, worldY);
     if (target) {
       const handled = this.scc.click(target.name, selectedItem);
       if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${worldX},${worldY})\nHit candidates (front to back): ${debugHits.map((candidate) => `${candidate.name}=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: ${target.name}\nSCC handler lookup: ${this.handlerSummary(target.name, selectedItem)}\nState / Case: ${this.caseSummary(target.name, selectedItem)}\nProgram dispatched: ${handled ? 'yes' : 'no — rejected (no matching Click handler + Case)'}`;
@@ -835,11 +834,22 @@ export class SceneView {
   selectItem(id: number): void { this.selectedItem = id; }
 
   private hitboxObjectTargets(): DepthHitTarget[] {
-    return [...this.objects.values()].map((object) => ({
+    const targets: DepthHitTarget[] = [...this.objects.values()].map((object) => ({
       name: object.name, x: object.sprite.x, y: object.sprite.y, width: object.width, height: object.height,
       visible: object.sprite.visible, removed: object.removed, hitPixels: object.hitPixels,
       depth: object.depth, order: object.order,
     }));
+    if (this.heroHitImage) {
+      const { width, height, hitPixels } = this.heroHitImage;
+      targets.push({
+        name: 'Mainhero', width, height, hitPixels,
+        x: this.hero.x + (0.5 - this.hero.anchor.x) * width * this.hero.scale.x,
+        y: this.hero.y + (0.5 - this.hero.anchor.y) * height * this.hero.scale.y,
+        scaleX: this.hero.scale.x, scaleY: this.hero.scale.y,
+        visible: this.hero.visible, removed: false, depth: this.heroDepth, order: -1,
+      });
+    }
+    return targets;
   }
 
   private handlerSummary(name: string, itemId: number): string {
@@ -862,28 +872,27 @@ export class SceneView {
   }
 
   private hitboxObjectInfo(name: string, x: number, y: number) {
-    const object = this.objects.get(name);
     const stored = this.state.objects.get(name);
-    const target = object && this.hitboxObjectTargets().find((candidate) => candidate.name === name);
+    const target = this.hitboxObjectTargets().find((candidate) => candidate.name === name);
     const activeDeclaration = findNamedObject(this.definition.active.values(), name);
     const lightDeclaration = findNamedObject(this.definition.lights.values(), name);
     const isActive = Boolean(activeDeclaration?.rect);
     const activeHit = isActive && activeHitTest({ visible: this.activeVisible(name), rect: activeDeclaration!.rect! }, x - this.scrollX, y, this.scrollX, 0);
     const pixelReason = isActive ? activeHit ? undefined : this.activeVisible(name) ? 'outside Active rectangle' : 'hidden' : target ? hitRejectionReason(target, x, y) : 'no runtime image/geometry';
-    const reason = !pixelReason && object?.depth === 0 ? 'zero depth (excluded by hit pipeline)' : pixelReason;
+    const reason = !pixelReason && target?.depth === 0 ? 'zero depth (excluded by hit pipeline)' : pixelReason;
     const handlers = this.scc.handlers.filter((handler) => handler.event === name);
     const hasCase = handlers.some((handler) => handler.itemId === this.selectedItem && handler.programs.has(this.handlerState(handler.stateObject, handler.stateScene)));
     return {
       name, kind: stored?.kind ?? (isActive ? 'Active' : lightDeclaration ? 'Light' : 'Object'),
-      state: stored?.state ?? 0, depth: object?.depth ?? stored?.depth ?? 0, cursorId: stored?.cursorId ?? this.definition.objects.get(name)?.cursorId,
-      visible: object ? object.sprite.visible && !object.removed : stored?.visible ?? false,
+      state: stored?.state ?? 0, depth: target?.depth ?? stored?.depth ?? 0, cursorId: stored?.cursorId ?? this.definition.objects.get(name)?.cursorId,
+      visible: target ? target.visible && !target.removed : stored?.visible ?? false,
       mult: stored?.mult ? `${stored.mult.file} frame=${stored.mult.frame} slot=${stored.mult.slot} child=${stored.mult.child}` : stored?.imageHidden ? 'empty (Hide)' : 'none',
       hasClickHandlers: handlers.length > 0, caseMatch: hasCase, hit: isActive ? activeHit : target ? !reason : false, rejection: reason,
       case: handlers.length ? this.caseSummary(name, this.selectedItem) : `no Click handlers; selected item=${this.selectedItem}`,
-      x: object?.sprite.x ?? stored?.transform?.x, y: object?.sprite.y ?? stored?.transform?.y,
-      width: object?.width ?? (activeDeclaration?.rect ? activeDeclaration.rect.right - activeDeclaration.rect.left : undefined),
-      height: object?.height ?? (activeDeclaration?.rect ? activeDeclaration.rect.bottom - activeDeclaration.rect.top : undefined),
-      withinGeometry: Boolean(object && Math.abs(x - object.sprite.x) < object.width / 2 && Math.abs(y - object.sprite.y) < object.height / 2) || Boolean(activeDeclaration?.rect && x > activeDeclaration.rect.left && x < activeDeclaration.rect.right && y > activeDeclaration.rect.top && y < activeDeclaration.rect.bottom),
+      x: target?.x ?? stored?.transform?.x, y: target?.y ?? stored?.transform?.y,
+      width: target ? target.width * Math.abs(target.scaleX ?? 1) : activeDeclaration?.rect ? activeDeclaration.rect.right - activeDeclaration.rect.left : undefined,
+      height: target ? target.height * Math.abs(target.scaleY ?? 1) : activeDeclaration?.rect ? activeDeclaration.rect.bottom - activeDeclaration.rect.top : undefined,
+      withinGeometry: Boolean(target && Math.abs(x - target.x) < target.width * Math.abs(target.scaleX ?? 1) / 2 && Math.abs(y - target.y) < target.height * Math.abs(target.scaleY ?? 1) / 2) || Boolean(activeDeclaration?.rect && x > activeDeclaration.rect.left && x < activeDeclaration.rect.right && y > activeDeclaration.rect.top && y < activeDeclaration.rect.bottom),
     };
   }
 
