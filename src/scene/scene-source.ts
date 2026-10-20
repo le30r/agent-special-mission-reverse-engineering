@@ -37,6 +37,8 @@ export type SceneManifestEntry = {
   scc: string;
   includes: string[];
   background: string | null;
+  /** Normalized Back/Setbck resource names -> prepared PNG URLs. */
+  backgrounds?: Record<string, string>;
   mask: string | null;
   /** Normalized original Setmsk path -> prepared raw TIFF URL. */
   masks?: Record<string, string>;
@@ -84,8 +86,8 @@ export type SceneResourceReader = {
 };
 export type SceneLoadTimings = { sceneFetchMs: number; alternateMaskDecodeMs: number; multFetchDecodeMs: number; maskDecodeMs: number; definitionBuildMs: number; externalTextureMs: number; backgroundTextureMs: number };
 
-type AssetLease = { scene: { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrl: string } };
-type SharedAssetCache = Map<number, { promise: Promise<AssetLease>; refs: number }>;
+type AssetLease = { promise: Promise<{ scene: { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrls: string[] } }>; refs: number };
+type SharedAssetCache = Map<number, AssetLease>;
 type SharedProviderState = { assets: SharedAssetCache; validationIndices: Map<number, SceneValidationIndex> };
 
 export class SceneLoadError extends Error {
@@ -229,6 +231,7 @@ export async function loadSceneDefinition(
     scc,
     includeSources,
     background: entry.background ?? '',
+    backgrounds: entry.backgrounds,
     mask: decodedMask,
     masks,
     mults,
@@ -263,7 +266,7 @@ export class SceneAssetProvider implements SceneProvider {
   readonly ids: number[];
   readonly contentId: string;
   private readonly byId: Map<number, SceneManifestEntry>;
-  private readonly loaded = new Map<number, { promise: Promise<AssetLease>; refs: number }>();
+  private readonly loaded = new Map<number, AssetLease>();
   private readonly shared: SharedProviderState;
   lastLoadResourceTimings: SceneLoadTimings = zeroLoadTimings();
   lastValidationResourceTimings: SceneLoadTimings = zeroLoadTimings();
@@ -300,7 +303,7 @@ export class SceneAssetProvider implements SceneProvider {
     let lease = this.shared.assets.get(id);
     if (lease) { lease.refs++; this.lastLoadResourceTimings = zeroLoadTimings(); }
     else {
-      const promise = (async (): Promise<AssetLease> => {
+      const promise = (async (): Promise<{ scene: { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrls: string[] } }> => {
         let externalUrls: string[] = [];
         try {
           const definition = await loadSceneDefinition(entry, this.reader, this.manifest.audioResources, this.manifest.audioDurations, this.manifest.audioStorageModes, timings => { this.lastLoadResourceTimings = timings; });
@@ -314,9 +317,19 @@ export class SceneAssetProvider implements SceneProvider {
           const backgroundUrl = entry.background;
           if (!backgroundUrl) throw new SceneLoadError(id, ['background is not prepared']);
           resourceStart = performance.now();
-          const background = await acquireBackground(backgroundUrl, loadSceneBackground);
+          const backgroundUrls: string[] = [];
+          const textures = new Map<string, Texture>();
+          try {
+            for (const url of new Set([backgroundUrl, ...Object.values(entry.backgrounds ?? {})])) {
+              textures.set(url, await acquireBackground(url, loadSceneBackground));
+              backgroundUrls.push(url);
+            }
+          } catch (error) {
+            for (const url of backgroundUrls) releaseBackground(url);
+            throw error;
+          }
           this.lastLoadResourceTimings.backgroundTextureMs = performance.now() - resourceStart;
-          return { scene: { definition, background, externalUrls, backgroundUrl } };
+          return { scene: { definition, background: textures.get(backgroundUrl)!, externalUrls, backgroundUrls } };
         } catch (error) {
           if (externalUrls.length) releaseExternalTextures(externalUrls);
           throw error;
@@ -405,10 +418,10 @@ export class SceneAssetProvider implements SceneProvider {
     if (record.refs > 0) return;
     if (this.shared.assets.get(id) === record) this.shared.assets.delete(id);
     void record.promise.then(({ scene }) => {
-      releaseBackground(scene.backgroundUrl);
+      for (const url of scene.backgroundUrls) releaseBackground(url);
       releaseExternalTextures(scene.externalUrls);
       for (const animation of scene.definition.animations.values()) releaseMultTextures(animation.file);
-    });
+    }).catch(() => {});
   }
 }
 

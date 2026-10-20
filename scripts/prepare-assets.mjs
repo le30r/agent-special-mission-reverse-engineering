@@ -146,8 +146,8 @@ for (const scene of discovery.scenes) {
   for (const resource of scene.masks) {
     if (await copyIfChanged(path.join(source, resource.sourcePath), path.join(output, resource.sourcePath))) copied.mask++;
   }
-  if (scene.background && await copyIfChanged(path.join(source, scene.background.sourcePath), path.join(output, scene.background.sourcePath))) {
-    copied.background++;
+  for (const resource of scene.backgrounds) {
+    if (await copyIfChanged(path.join(source, resource.sourcePath), path.join(output, resource.sourcePath))) copied.background++;
   }
   for (const animation of scene.animations) {
     if (!animation.sourcePath) continue;
@@ -162,23 +162,24 @@ for (const scene of discovery.scenes) {
  */
 const backgroundTargets = new Map();
 for (const scene of discovery.scenes) {
-  if (!scene.background) continue;
-  const basename = path.basename(scene.background.sourcePath).replace(/\.tif{1,2}$/i, '.png');
-  let relative = `generated/backgrd/${basename}`;
-  if (backgroundTargets.has(relative) && backgroundTargets.get(relative) !== scene.background.sourcePath) {
-    // Defensive: keep distinct backgrounds distinct even if basenames collide.
-    const suffix = scene.background.sourcePath.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    relative = `generated/backgrd/${path.basename(basename, '.png')}-${suffix}.png`;
+  for (const background of scene.backgrounds) {
+    const basename = path.basename(background.sourcePath).replace(/\.tif{1,2}$/i, '.png');
+    let relative = `generated/backgrd/${basename}`;
+    if (backgroundTargets.has(relative) && backgroundTargets.get(relative) !== background.sourcePath) {
+      // Defensive: keep distinct backgrounds distinct even if basenames collide.
+      const suffix = background.sourcePath.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      relative = `generated/backgrd/${path.basename(basename, '.png')}-${suffix}.png`;
+    }
+    backgroundTargets.set(relative, background.sourcePath);
+    const result = await convertTiff(path.join(source, background.sourcePath), path.join(root, 'public', relative));
+    if (!result.ok) {
+      converted.failed++;
+      diagnostics.push({ level: 'error', scene: scene.id, kind: 'background-convert', path: background.sourcePath, message: String(result.reason) });
+      continue;
+    }
+    if (result.skipped) converted.skipped++;
+    else converted.background++;
   }
-  backgroundTargets.set(relative, scene.background.sourcePath);
-  const result = await convertTiff(path.join(source, scene.background.sourcePath), path.join(root, 'public', relative));
-  if (!result.ok) {
-    converted.failed++;
-    diagnostics.push({ level: 'error', scene: scene.id, kind: 'background-convert', path: scene.background.sourcePath, message: String(result.reason) });
-    continue;
-  }
-  if (result.skipped) converted.skipped++;
-  else converted.background++;
 }
 
 const externalSourceToTarget = new Map();
@@ -232,6 +233,12 @@ for (const scene of discovery.scenes) {
   if (scene.mask && !maskExists) {
     required.push({ kind: 'mask', originalPath: scene.mask.originalPath, sourcePath: scene.mask.sourcePath, required: true, message: `Mask copy failed for Level${scene.id}` });
   }
+  const backgrounds = {};
+  for (const resource of scene.backgrounds) {
+    const relative = [...backgroundTargets.entries()].find(([, sourcePath]) => sourcePath === resource.sourcePath)?.[0];
+    if (relative && existsSync(path.join(root, 'public', relative))) backgrounds[normalizeOriginalPath(resource.originalPath)] = `/${relative}`;
+    else required.push({ kind: 'background', originalPath: resource.originalPath, sourcePath: resource.sourcePath, required: true, message: `Background conversion failed for Level${scene.id}` });
+  }
   const masks = {};
   for (const resource of scene.masks) {
     const exists = existsSync(path.join(output, resource.sourcePath));
@@ -245,6 +252,7 @@ for (const scene of discovery.scenes) {
     scc: `/resources/${scene.sccFileName}`,
     includes: scene.includes.map((include) => `/resources/${path.basename(include.sourcePath)}`),
     background: backgroundExists ? `/${backgroundRelative}` : null,
+    backgrounds,
     mask: maskExists ? `/resources/${scene.mask.sourcePath}` : null,
     masks,
     animations,
@@ -265,6 +273,8 @@ for (const scene of discovery.scenes) {
 const loadable = scenes.filter((scene) => scene.loadable).map((scene) => scene.id);
 const incomplete = scenes.filter((scene) => !scene.loadable).map((scene) => ({ id: scene.id, reasons: scene.missing.required.map((entry) => entry.message) }));
 // Save compatibility follows actual SCC/resource semantics, not generated URLs or timestamps.
+// Keep the existing background hash coverage: newly discovered Setbck-only images
+// are presentation resources and do not invalidate persistent world state.
 const semanticFiles = new Map();
 for (const scene of discovery.scenes) {
   semanticFiles.set(path.join(scripts, scene.sccFileName), `scripts/${scene.sccFileName}`);

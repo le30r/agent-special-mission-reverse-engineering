@@ -33,6 +33,7 @@ export type SceneDependencyRecord = {
   sccFileName: string;
   includes: SourcePath[];
   background?: SourcePath;
+  backgrounds: SourcePath[];
   mask?: SourcePath;
   masks: SourcePath[];
   animations: SceneAnimationDependency[];
@@ -307,6 +308,8 @@ export async function discoverSceneDependencies(options: DiscoveryOptions): Prom
     };
 
     const background = resolve(header.background, 'background');
+    const backgroundPaths = new Set<string>([...(header.background ? [header.background] : []), ...[...expanded.source.matchAll(/^\s*Setbck\s+(\S+)/gim)].map((match) => match[1])]);
+    const backgrounds = [...backgroundPaths].map((backgroundPath) => resolve(backgroundPath, 'background')).filter((resource): resource is SourcePath => Boolean(resource));
     const mask = resolve(header.mask, 'mask');
     const maskPaths = new Set<string>([...(header.mask ? [header.mask] : []), ...[...expanded.source.matchAll(/^\s*Setmsk\s+(\S+)/gim)].map((match) => match[1])]);
     const masks = [...maskPaths].map((maskPath) => resolve(maskPath, 'mask')).filter((resource): resource is SourcePath => Boolean(resource));
@@ -389,6 +392,7 @@ export async function discoverSceneDependencies(options: DiscoveryOptions): Prom
       sccFileName: sceneFile.file,
       includes: expanded.includes,
       background,
+      backgrounds,
       mask,
       masks,
       animations,

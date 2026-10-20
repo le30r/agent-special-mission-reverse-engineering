@@ -8,7 +8,7 @@ import type { SceneDefinition } from './scene-definition';
 import { normalizeExternalPath } from './scene-definition';
 import { depthOriginLabel, setStateDepth, type DepthProvenance, type SceneImageReference, type SceneObjectState, type SceneState, type Transform, type PersistentHeroState } from './scene-loader';
 import type { SceneEntry } from './scene-entry';
-import { cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
+import { cachedBackground, cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
 import { activeHitTest, worldPointFromScreen } from './active-hit';
 import { applyObjectVisibility, assignImageReference } from './object-visibility';
 import { firstHitTarget, hitRejectionReason, orderedHitTargets, type DepthHitTarget } from './object-hit';
@@ -144,6 +144,7 @@ export class SceneView {
       setZone: (zone) => hooks.setZone(zone),
       setMap: (bank) => hooks.setMap?.(bank),
       setMask: (path) => this.setNavigationMask(path),
+      setBackground: (path) => this.setSceneBackground(path),
       setBlocked: (blocked) => { this.inputBlocked = blocked; },
       goto: (x, y) => this.goto(x, y),
       goport: (portal) => this.goport(portal),
@@ -253,6 +254,13 @@ export class SceneView {
     return this.activeMask === this.definition.mask
       ? this.definition.initialMaskPath
       : [...(this.definition.masks ?? new Map())].find(([, mask]) => mask === this.activeMask)?.[0] ?? '';
+  }
+
+  private setSceneBackground(path: string): void {
+    const url = this.definition.backgrounds?.get(normalizeExternalPath(path));
+    const texture = url ? cachedBackground(url) : undefined;
+    if (!texture) throw new Error(`Setbck resource was not prepared for scene ${this.definition.id}: ${path}`);
+    this.backdrop.texture = texture;
   }
 
   private setNavigationMask(path: string): void {

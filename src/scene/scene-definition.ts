@@ -22,6 +22,7 @@ export type SceneDefinition = {
   /** Original SCC text that the runtime parses. */
   scc: string;
   background: string;
+  backgrounds?: ReadonlyMap<string, string>;
   mask: NavigationMask;
   /** All Setmsk targets referenced by this scene, indexed by normalized SCC path. */
   masks: Map<string, NavigationMask>;
@@ -86,6 +87,7 @@ export type SceneDefinitionInput = {
   /** Legacy direct Mainhero text; equivalent to including it in `includeSources`. */
   mainheroScc?: string;
   background: string;
+  backgrounds?: Readonly<Record<string, string>>;
   mask: NavigationMask;
   masks?: ReadonlyMap<string, NavigationMask>;
   mults: ReadonlyMap<string, Uint8Array | ArrayBuffer | MultFile>;
@@ -208,6 +210,7 @@ export function buildSceneDefinition(input: SceneDefinitionInput): SceneDefiniti
     sccUrl,
     scc,
     background,
+    backgrounds: new Map(Object.entries(input.backgrounds ?? {}).map(([path, url]) => [normalizeExternalPath(path), url])),
     mask,
     masks: new Map([...(input.masks ?? new Map()).entries()].map(([path, value]) => [normalizeExternalPath(path), value])),
     initialMaskPath: normalizeExternalPath(initialMaskPath),

@@ -135,6 +135,8 @@ export async function acquireBackground(url: string, loader: (url: string) => Pr
   return texture;
 }
 
+export function cachedBackground(url: string): Texture | undefined { return backgrounds.get(url)?.texture; }
+
 export function releaseBackground(url: string): void {
   const record = backgrounds.get(url);
   if (!record) return;
