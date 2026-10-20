@@ -25,3 +25,13 @@ initial visible raster, hidden hotspot, Show/Hide separation, independent depth,
 re-entry, legacy snapshots, and codec/transactional session restore. Canvas
 texture creation is replaced in these tests; they are runtime regressions, not
 browser screenshot evidence.
+
+## Frozen staircase click mask
+
+Level8's `Lec_v` ladder has depth 20000, which intentionally suppresses later
+image-frame assignments. The initial internal layout raster previously had no
+`hitPixels`, so the visible ladder rejected every click with `no hit image`.
+Initial layout creation now builds the internal raster's alpha hit mask as well
+as its texture. The regression clicks an opaque ladder pixel through the real
+pointer pipeline and completes both upstairs/downstairs SCC animations and
+hotspot state changes. Navigation and final Setxy placement are stubbed.

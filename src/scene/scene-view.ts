@@ -313,6 +313,9 @@ export class SceneView {
         texture = ext.texture; hitPixels = ext.hitPixels; width = ext.width; height = ext.height;
       } else if (resolved.bgra) {
         texture = resolvedTexture(file, 1, record, resolved); width = resolved.width; height = resolved.height;
+        // Frozen layout objects (depth >= 10000) never receive a later frame
+        // assignment, so their click mask must exist on the initial image too.
+        hitPixels = multHitPixels(resolved);
       } else continue;
       const sprite = new Sprite(texture);
       sprite.anchor.set(0.5);

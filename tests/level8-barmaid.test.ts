@@ -5,6 +5,7 @@ import { Container } from 'pixi.js';
 import { SaveCodec } from '../src/scene/save-codec';
 import { SceneSession, declareSceneObjects } from '../src/scene/scene-session';
 import { SceneView } from '../src/scene/scene-view';
+import { firstHitTarget, type DepthHitTarget } from '../src/scene/object-hit';
 import { findFrameTarget } from '../src/scene/mult-target';
 import { loadTestSceneCatalog, catalogDefinition } from './helpers/scene-catalog';
 
@@ -29,6 +30,44 @@ async function setup() {
 }
 
 describe('Level8 barmaid and same-name Active/Object', () => {
+  it('accepts a pixel click on the frozen ladder and completes the upstairs SCC program', async () => {
+    const { state, view } = await setup();
+    try {
+      const ladder = view.objects.get('Lec_v')!;
+      expect(ladder.depth).toBe(20000);
+      expect(ladder.hitPixels).toBeDefined();
+      const targets = (view as unknown as { hitboxObjectTargets(): DepthHitTarget[] }).hitboxObjectTargets();
+      let click: [number, number] | undefined;
+      for (let pixel = 0; pixel < ladder.width * ladder.height; pixel++) {
+        if (!ladder.hitPixels![pixel * 4 + 3]) continue;
+        const x = ladder.sprite.x - ladder.width / 2 + pixel % ladder.width + 0.5;
+        const y = ladder.sprite.y - ladder.height / 2 + Math.floor(pixel / ladder.width) + 0.5;
+        if (firstHitTarget(targets, x, y)?.name === 'Lec_v') { click = [x - view.scrollX, y]; break; }
+      }
+      expect(click).toBeDefined();
+      view.scc.host.goto = vi.fn(() => false);
+      view.scc.host.setPosition = vi.fn();
+      const dispatch = vi.spyOn(view.scc, 'click');
+      view.pointerDown(...click!);
+      expect(dispatch).toHaveBeenCalledWith('Lec_v', 0);
+      for (let tick = 1; tick <= 400; tick++) view.tick(50, tick * 50, tick);
+      expect(view.scc.host.setPosition).toHaveBeenCalledWith(310, 185);
+      expect(state.objects.get('Lec_v')?.state).toBe(1);
+      expect(view.activeVisible('Barm_click')).toBe(true);
+      expect(view.activeVisible('Micro')).toBe(true);
+      expect(view.scc.busy).toBe(false);
+
+      view.pointerDown(...click!);
+      expect(dispatch).toHaveBeenLastCalledWith('Lec_v', 0);
+      for (let tick = 401; tick <= 800; tick++) view.tick(50, tick * 50, tick);
+      expect(view.scc.host.setPosition).toHaveBeenCalledWith(205, 400);
+      expect(state.objects.get('Lec_v')?.state).toBe(0);
+      expect(view.activeVisible('Barm_click')).toBe(false);
+      expect(view.activeVisible('Micro')).toBe(false);
+      expect(view.scc.busy).toBe(false);
+    } finally { view.dispose(); }
+  });
+
   it('draws the barmaid immediately while her upstairs hotspot remains hidden', async () => {
     const { state, view } = await setup();
     try {
