@@ -51,6 +51,32 @@ export type SceneDefinition = {
   audioStorageModes?: Readonly<Record<string, 'sharedPcm' | 'privateDecoded'>>;
 };
 
+/** Compact, texture-free identity metadata used to validate persistent saves. */
+export type SceneValidationIndex = {
+  id: number;
+  scc: string;
+  objectNames: ReadonlySet<string>;
+  activeNames: ReadonlySet<string>;
+  lightNames: ReadonlySet<string>;
+  frameDepthEvents: readonly Pick<FrameDepthEvent, 'animation' | 'frame' | 'objectName'>[];
+  animations: ReadonlyMap<string, { frameCount: number; frames?: readonly (readonly string[])[] }>;
+};
+
+export function createSceneValidationIndex(definition: SceneDefinition): SceneValidationIndex {
+  const animations = new Map<string, { frameCount: number; frames: string[][] }>();
+  for (const [name, animation] of definition.animations) {
+    animations.set(name, { frameCount: animation.file.frameCount, frames: animation.file.frames.map(frame => frame.map(record => record.name)) });
+  }
+  return {
+    id: definition.id, scc: definition.scc,
+    objectNames: new Set([...definition.objects.keys()].map(name => name.toUpperCase())),
+    activeNames: new Set([...definition.active.keys()].map(name => name.toUpperCase())),
+    lightNames: new Set([...definition.lights.keys()].map(name => name.toUpperCase())),
+    frameDepthEvents: definition.frameDepthEvents.map(({ animation, frame, objectName }) => ({ animation, frame, objectName })),
+    animations,
+  };
+}
+
 export type SceneDefinitionInput = {
   id: number;
   sccUrl: string;

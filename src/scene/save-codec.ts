@@ -13,6 +13,7 @@ export type SaveError = { code: SaveErrorCode; message: string; cause?: unknown 
 export type Result<T, E = SaveError> = { ok: true; value: T } | { ok: false; error: E };
 export type SaveEligibility = { ok: true } | { ok: false; code: 'Busy' | 'TransitionInProgress'; reason: string };
 export type SaveEnvelopeV1 = { storageVersion: 1; payload: string; integrity: { algorithm: 'sha256-utf8'; digest: string } };
+export type SaveDecodePhase = 'envelopeJsonMs' | 'sha256Ms' | 'payloadJsonMs' | 'schemaValidationMs';
 
 const MAX_PAYLOAD_BYTES = 2 * 1024 * 1024;
 const MAX_SCENES = 128;
@@ -125,15 +126,25 @@ export class SaveCodec {
     return {ok:true,value:JSON.stringify(envelope)};
   }
 
-  static decode(serialized: string, options: { contentId?: string; sceneIds?: readonly number[]; validItem?: (id: number) => boolean } = {}): Result<GameSaveV1> {
+  static decode(serialized: string, options: { contentId?: string; sceneIds?: readonly number[]; validItem?: (id: number) => boolean } = {}, onTiming?: (phase: SaveDecodePhase, durationMs: number) => void): Result<GameSaveV1> {
     if (typeof serialized !== 'string' || new TextEncoder().encode(serialized).byteLength > MAX_PAYLOAD_BYTES + 1024) return fail('Save envelope exceeds size limit');
     let envelope: unknown;
+    let phaseStart=performance.now();
     try { envelope=JSON.parse(serialized); } catch { return fail('Save envelope is not valid JSON'); }
+    onTiming?.('envelopeJsonMs',performance.now()-phaseStart);
     if (!plainObject(envelope)||!onlyKeys(envelope,['storageVersion','payload','integrity'])||Object.keys(envelope).length!==3||envelope.storageVersion!==1||typeof envelope.payload!=='string'||!plainObject(envelope.integrity)||!onlyKeys(envelope.integrity,['algorithm','digest'])||Object.keys(envelope.integrity).length!==2||envelope.integrity.algorithm!=='sha256-utf8'||typeof envelope.integrity.digest!=='string') return fail('Invalid save envelope');
     if (new TextEncoder().encode(envelope.payload).byteLength > MAX_PAYLOAD_BYTES) return fail('Save payload exceeds 2 MiB limit');
-    if (sha256(envelope.payload)!==envelope.integrity.digest) return fail('Save digest mismatch');
+    phaseStart=performance.now();
+    const digest=sha256(envelope.payload);
+    onTiming?.('sha256Ms',performance.now()-phaseStart);
+    if (digest!==envelope.integrity.digest) return fail('Save digest mismatch');
     let save: unknown;
+    phaseStart=performance.now();
     try { save=JSON.parse(envelope.payload); } catch { return fail('Save payload is not valid JSON'); }
-    return this.validate(save,options);
+    onTiming?.('payloadJsonMs',performance.now()-phaseStart);
+    phaseStart=performance.now();
+    const result=this.validate(save,options);
+    onTiming?.('schemaValidationMs',performance.now()-phaseStart);
+    return result;
   }
 }

@@ -9,6 +9,20 @@ import { composeMultForCanvas, type MultFile, type MultObject, type ResolvedMult
 const multTextures = new Map<string, Texture>();
 const fileIds = new WeakMap<MultFile, number>();
 let nextFileId = 1;
+let pixiTextureCreateCount = 0;
+let pixiTextureCreateMs = 0;
+
+/** CPU-side Pixi Texture.from creation; GPU upload occurs on the next render. */
+export function createPixiTexture(source: HTMLCanvasElement | HTMLImageElement): Texture {
+  const start = performance.now();
+  const texture = Texture.from(source);
+  pixiTextureCreateMs += performance.now() - start;
+  pixiTextureCreateCount++;
+  return texture;
+}
+
+export function resetPixiTextureDiagnostics(): void { pixiTextureCreateCount = 0; pixiTextureCreateMs = 0; }
+export function pixiTextureDiagnostics(): { count: number; createMs: number } { return { count: pixiTextureCreateCount, createMs: pixiTextureCreateMs }; }
 
 function multFileId(file: MultFile): number {
   let id = fileIds.get(file);
@@ -22,7 +36,7 @@ function createTexture(object: MultObject): Texture {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   if (!ctx) throw new Error('Canvas 2D context unavailable');
   ctx.putImageData(new ImageData(composeMultForCanvas(object.a, object.b, object.bgra), object.a, object.b), 0, 0);
-  return Texture.from(canvas);
+    return createPixiTexture(canvas);
 }
 
 export function resolvedTexture(file: MultFile, frame: number, record: MultObject, resolved: ResolvedMultObject): Texture {
@@ -70,7 +84,7 @@ async function loadExternalTexture(url: string): Promise<ExternalTexture> {
   // fully transparent for click geometry and are not composited.
   for (let i = 0; i < id.data.length; i += 4) if (id.data[i] === 0xb5 && id.data[i + 1] === 0xb5 && id.data[i + 2] === 0xb5) id.data[i + 3] = 0;
   ctx.putImageData(id, 0, 0);
-  return { texture: Texture.from(canvas), hitPixels: id.data, width: canvas.width, height: canvas.height };
+  return { texture: createPixiTexture(canvas), hitPixels: id.data, width: canvas.width, height: canvas.height };
 }
 
 export async function acquireExternalTexture(url: string): Promise<ExternalTexture> {

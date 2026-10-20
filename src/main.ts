@@ -11,6 +11,8 @@ import { BrowserAudioBackend } from './audio/backend';
 import { DebugPanel } from './scene/debug-panel';
 import { SaveRepository } from './scene/save-repository';
 import { SaveLoadView } from './scene/save-load-view';
+import { SaveCodec } from './scene/save-codec';
+import { pixiTextureDiagnostics } from './scene/textures';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -184,8 +186,15 @@ async function main() {
     const debugWindow = window as Window & { __saveLoadDebug?: unknown };
     debugWindow.__saveLoadDebug = {
       canSave: () => session.canSave(),
+      decodeSave: (serialized: string) => {
+        const phases: Record<string, number> = {};
+        const result = SaveCodec.decode(serialized, { contentId: catalog.manifest.contentId, sceneIds: catalog.manifest.summary.loadable }, (phase, durationMs) => { phases[phase] = durationMs; });
+        return { result, phases };
+      },
       exportSave: (label = 'E2E') => session.exportSave(label),
       importSave: (save: Parameters<typeof session.importSave>[0]) => session.importSave(save),
+      restoreDiagnostics: () => session.lastRestoreDiagnostics,
+      textureDiagnostics: pixiTextureDiagnostics,
     };
   }
   // The initial scene uses the same deferred boundary as an SCC Level command.

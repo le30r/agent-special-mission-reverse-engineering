@@ -23,6 +23,7 @@
     "e2e:browser:lora": "node scripts/e2e-browser-all.mjs e2e-browser-lora.mjs",
     "e2e:browser:inventory-combination": "node scripts/e2e-browser-all.mjs e2e-browser-inventory-combination.mjs",
     "e2e:browser:save-load": "node scripts/e2e-browser-all.mjs e2e-browser-save-load.mjs",
+    "e2e:browser:save-load-performance": "node scripts/e2e-browser-all.mjs e2e-browser-save-load-performance.mjs",
     "e2e:browser:save-load-ui": "node scripts/e2e-browser-all.mjs e2e-browser-save-load-ui.mjs",
     "e2e:browser:save-state-identities": "node scripts/e2e-browser-all.mjs e2e-browser-save-state-identities.mjs",
     "e2e:browser:hitbox": "node scripts/e2e-browser-all.mjs e2e-browser-hitbox.mjs",

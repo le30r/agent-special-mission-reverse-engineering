@@ -38,6 +38,37 @@ export type MultFile = {
 const decoder = new TextDecoder('windows-1251');
 const readString = (bytes: Uint8Array) => decoder.decode(bytes.subarray(0, bytes.indexOf(0) < 0 ? bytes.length : bytes.indexOf(0)));
 
+/** Reads only MULT record identities and frame counts; no palette/RLE pixel decode. */
+export function decodeMultIdentityIndex(input: ArrayBuffer | Uint8Array, includeRecords = true): { frameCount: number; frames: string[][] } {
+  const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
+  if (bytes.length < 0x4000) throw new Error('MULT header is truncated');
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const frameCount = view.getUint32(0, true);
+  if (frameCount > 100000) throw new Error('MULT frame count exceeds safe limit');
+  const frames: string[][] = [];
+  let offset = 0x4000;
+  for (let slot = 1; slot <= frameCount; slot++) {
+    if (offset + 4 > bytes.length) throw new Error(`Missing record count for MULT frame ${slot}`);
+    const count = view.getUint32(offset, true);
+    offset += 4;
+    if (count > 1000000) throw new Error(`MULT record count exceeds safe limit in frame ${slot}`);
+    const frame: string[] = [];
+    for (let child = 0; child < count; child++) {
+      if (offset + 0x42 > bytes.length) throw new Error(`Truncated object header at 0x${offset.toString(16)}`);
+      const type = view.getInt32(offset + 0x32, true);
+      const recordSize = view.getUint32(offset + 0x36, true);
+      if (recordSize < 0x4a || offset + recordSize > bytes.length) throw new Error(`Invalid record size ${recordSize} at 0x${offset.toString(16)}`);
+      if (type !== -16 && type !== -13 && type !== -14) throw new Error(`Unsupported MULT record type ${type}`);
+      if ((type === -13 && recordSize !== 74) || (type === -14 && recordSize !== 330)) throw new Error('Invalid MULT reference/external record size');
+      if (includeRecords) frame.push(readString(bytes.subarray(offset, offset + 50)));
+      offset += recordSize;
+    }
+    frames.push(frame);
+  }
+  if (offset !== bytes.length) throw new Error(`MULT has ${bytes.length - offset} trailing bytes`);
+  return { frameCount, frames };
+}
+
 export function decodeMult(input: ArrayBuffer | Uint8Array): MultFile {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input);
   if (bytes.length < 0x4000) throw new Error('MULT header is truncated');
