@@ -1,5 +1,6 @@
-import { Texture } from 'pixi.js';
+import { Texture, TextureSource } from 'pixi.js';
 import { describe, expect, it, vi } from 'vitest';
+import { acquireBackground, releaseBackground } from '../src/scene/textures';
 import { SceneView } from '../src/scene/scene-view';
 import { createSceneState } from '../src/scene/scene-loader';
 import { catalogDefinition, loadTestSceneCatalog } from './helpers/scene-catalog';
@@ -16,6 +17,8 @@ describe('Level23 repeat visit dialogue', () => {
   it('ends the grief dialogue and waits for the mirror, then the photograph', async () => {
     const catalog = await loadTestSceneCatalog([23]);
     const definition = catalogDefinition(catalog, 23);
+    const backgroundUrls = [...new Set(definition.backgrounds?.values())];
+    for (const url of backgroundUrls) await acquireBackground(url, async () => new Texture({ source: new TextureSource({ width: 1, height: 1 }) }));
     const state = createSceneState(23);
     state.initialized = true;
     // Level21 writes this state before the return to Level23.
@@ -57,6 +60,6 @@ describe('Level23 repeat visit dialogue', () => {
       expect(state.objects.get('Babka')?.state).toBe(7);
       expect(state.objects.get('Star')?.state).toBe(1);
       expect(view.scc.inventory).toEqual([]);
-    } finally { view.dispose(); }
+    } finally { view.dispose(); for (const url of backgroundUrls) releaseBackground(url); }
   }, 30000);
 });

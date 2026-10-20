@@ -1,7 +1,7 @@
 export type SccCommand =
   | { op: 'Goto'; x: number; y: number }
   | { op: 'Start' | 'StartW'; name: string }
-  | { op: 'Setmsk'; path: string }
+  | { op: 'Setmsk' | 'Setbck'; path: string }
   | { op: 'Block' | 'Ublock' }
   | { op: 'Stop'; name: string }
   | { op: 'Setxy'; x: number; y: number }
@@ -43,6 +43,7 @@ export type SccHost = {
   /** `Setmap` selects one of the two persistent map banks. */
   setMap?(bank: number): void;
   setMask?(path: string): void;
+  setBackground?(path: string): void;
   setBlocked?(blocked: boolean): void;
   /** Optional navigation request used by SCC `Goto`/`Goport`. */
   goto?(x: number, y: number): boolean;
@@ -160,7 +161,7 @@ export function parseScc(source: string): SccHandler[] {
       const commands = current.commands;
       if (word === 'goto' || word === 'setxy') commands.push({ op: word === 'goto' ? 'Goto' : 'Setxy', x: int(tokens[1]), y: int(tokens[2]) });
       else if (word === 'start' || word === 'startw' || word === 'statrw') commands.push({ op: word === 'start' ? 'Start' : 'StartW', name: tokens[1] });
-      else if (word === 'setmsk') commands.push({ op: 'Setmsk', path: tokens[1] });
+      else if (word === 'setmsk' || word === 'setbck') commands.push({ op: word === 'setmsk' ? 'Setmsk' : 'Setbck', path: tokens[1] });
       else if (word === 'block' || word === 'ublock') commands.push({ op: word === 'block' ? 'Block' : 'Ublock' });
       else if (word === 'stop') commands.push({ op: 'Stop', name: tokens[1] });
       else if (word === 'addtol') commands.push({ op: 'Addtol', id: int(tokens[1]) });
@@ -314,6 +315,7 @@ export class SccRuntime {
         this.busy = false; state.waiting = false; state.waitName = undefined; state.pc++; continue;
       }
       if (command.op === 'Start') { this.host.startAnimation(command.name); state.pc++; continue; }
+      if (command.op === 'Setbck') { this.host.setBackground?.(command.path); state.pc++; continue; }
       if (command.op === 'Setmsk') { this.host.setMask?.(command.path); state.pc++; continue; }
       if (command.op === 'Block') { this.host.setBlocked?.(true); state.pc++; continue; }
       if (command.op === 'Ublock') { this.host.setBlocked?.(false); state.pc++; continue; }

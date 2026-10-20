@@ -61,6 +61,11 @@ describe('automatic scene discovery', () => {
     expect(level1.animations.find((animation) => animation.name === 'Walk6')?.sourcePath).toBe('block1/Xsh/Base/walk6.MULT');
     expect(level1.externalImages.map((image) => normalizeOriginalPath(image.originalPath))).toContain('tzu/scn_37/botl/s0/botl.tif');
     expect(level1.missing.filter((missing) => missing.required)).toEqual([]);
+    const level23 = discovery.scenes.find((scene) => scene.id === 23)!;
+    expect(level23.backgrounds.map(resource => normalizeOriginalPath(resource.originalPath))).toEqual([
+      'backgrd/scn_23.tif', 'backgrd/scn_23_1.tif',
+    ]);
+    expect(level23.missing.filter(missing => missing.required)).toEqual([]);
   });
 
   it('prepares Level16 Setmsk TIFFs and routes against the selected raw mask', async () => {

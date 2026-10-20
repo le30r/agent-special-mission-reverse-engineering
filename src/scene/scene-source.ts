@@ -32,6 +32,8 @@ export type SceneManifestEntry = {
   scc: string;
   includes: string[];
   background: string | null;
+  /** Normalized Back/Setbck resource names -> prepared PNG URLs. */
+  backgrounds?: Record<string, string>;
   mask: string | null;
   /** Normalized original Setmsk path -> prepared raw TIFF URL. */
   masks?: Record<string, string>;
@@ -194,6 +196,7 @@ export async function loadSceneDefinition(
     scc,
     includeSources,
     background: entry.background ?? '',
+    backgrounds: entry.backgrounds,
     mask: decodeMask(maskBytes),
     masks,
     mults,
@@ -226,7 +229,7 @@ export class SceneAssetProvider implements SceneProvider {
   readonly ids: number[];
   readonly contentId: string;
   private readonly byId: Map<number, SceneManifestEntry>;
-  private readonly loaded = new Map<number, { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrl: string }>();
+  private readonly loaded = new Map<number, { definition: SceneDefinition; background: Texture; externalUrls: string[]; backgroundUrls: string[] }>();
 
   constructor(manifest: SceneManifest, reader: SceneResourceReader = fetchSceneReader) {
     this.manifest = manifest;
@@ -257,12 +260,19 @@ export class SceneAssetProvider implements SceneProvider {
       releaseExternalTextures(external.urls);
       throw new SceneLoadError(id, ['background is not prepared']);
     }
+    const backgroundUrls: string[] = [];
     try {
-      const background = await acquireBackground(backgroundUrl, loadSceneBackground);
-      const record = { definition, background, externalUrls: external.urls, backgroundUrl };
+      const textures = new Map<string, Texture>();
+      for (const url of new Set([backgroundUrl, ...Object.values(entry.backgrounds ?? {})])) {
+        textures.set(url, await acquireBackground(url, loadSceneBackground));
+        backgroundUrls.push(url);
+      }
+      const background = textures.get(backgroundUrl)!;
+      const record = { definition, background, externalUrls: external.urls, backgroundUrls };
       this.loaded.set(id, record);
       return record;
     } catch (error) {
+      for (const url of backgroundUrls) releaseBackground(url);
       releaseExternalTextures(external.urls);
       throw error;
     }
@@ -272,7 +282,7 @@ export class SceneAssetProvider implements SceneProvider {
     const record = this.loaded.get(id);
     if (!record) return;
     this.loaded.delete(id);
-    releaseBackground(record.backgroundUrl);
+    for (const url of record.backgroundUrls) releaseBackground(url);
     releaseExternalTextures(record.externalUrls);
     for (const animation of record.definition.animations.values()) releaseMultTextures(animation.file);
   }
