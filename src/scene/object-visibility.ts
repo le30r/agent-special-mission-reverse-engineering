@@ -39,7 +39,7 @@ export function applyObjectVisibility(
   const objectDeclaration = findNamedObject(definition.objects.values(), name);
   const kind = active ? 'Active' : light ? 'Light' : objectDeclaration ? 'Object' : undefined;
   const canonicalName = active?.name ?? light?.name ?? objectDeclaration?.name ?? name;
-  let stored = findNamedObject(state.objects.values(), name);
+  let stored = findNamedObject([...state.objects.values()].filter(object => !kind || (object.kind ?? 'Object') === kind || object.placeholder), name);
   if (!stored) {
     if (!kind) return { found: false, changed: false, clearImage: false };
     stored = { name: canonicalName, state: 0, depth: 0, kind, visible: kind === 'Object' ? undefined : false };

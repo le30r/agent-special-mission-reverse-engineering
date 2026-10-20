@@ -8,8 +8,9 @@ import { findNamedObject } from './object-identity';
  * no SCC `Object` (or runtime `State`) identity is therefore skipped: the engine
  * never invents an object or a depth for it.
  *
- * `Active` and `Light` are distinct vtables, not drawable base objects, so they
- * are not frame-image targets here either.
+ * `Active` and `Light` are not drawable frame-image targets. Filter by type
+ * before resolving the name: Level8 declares both Active and Object Barm_click,
+ * and its barmaid MULT assigns images to the drawable Object of that name.
  */
 export function findFrameTarget(
   objects: ReadonlyMap<string, SceneObjectState>,
@@ -17,8 +18,5 @@ export function findFrameTarget(
 ): SceneObjectState | undefined {
   // MULT resource names retain their original spelling; return the SCC
   // declaration as canonical runtime identity.
-  const object = findNamedObject(objects.values(), name);
-  if (!object) return undefined;
-  if (object.kind === 'Active' || object.kind === 'Light') return undefined;
-  return object;
+  return findNamedObject([...objects.values()].filter(object => object.kind !== 'Active' && object.kind !== 'Light'), name);
 }

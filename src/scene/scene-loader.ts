@@ -72,6 +72,17 @@ export function createSceneState(id: number): SceneState {
 }
 export function createSceneRuntime(id: number): SceneRuntime { return { id, handlers: [], animations: [], resources: new Set(), disposed: false }; }
 
+/** Map keys retain declaration order while separating same-name vtable kinds.
+ * SCC lookup still scans values by name; save DTOs already identify (kind, name).
+ */
+function objectStorageKey(objects: ReadonlyMap<string, SceneObjectState>, object: SceneObjectState): string {
+  for (const [key, value] of objects) {
+    if (value.name.toUpperCase() === object.name.toUpperCase()
+      && (value.placeholder || (value.kind ?? 'Object') === (object.kind ?? 'Object'))) return key;
+  }
+  return objects.has(object.name) ? `${object.kind ?? 'Object'}:${object.name}` : object.name;
+}
+
 /** Label used by ?debug=depth; keeps the native origin names visible. */
 export function depthOriginLabel(provenance: DepthProvenance | undefined): string {
   if (!provenance) return 'unknown origin';
@@ -124,13 +135,12 @@ export class SceneLoader {
     if (old) old.state = value; else if (!target.initialized) target.objects.set(name,{ name,state:value,depth:0,placeholder:true });
   }
   declareObject(scene: SceneState, object: SceneObjectState): void {
-    const exact = scene.objects.get(object.name);
-    // An Lstate-created placeholder can precede loading the target scene and use
-    // different casing from its declaration. Merge only that alias; preserve
-    // separate declared entries so corpus collisions remain observable.
-    const alias = exact ? undefined : findNamedObject(scene.objects.values(), object.name);
-    const old = exact ?? (alias?.placeholder ? alias : undefined);
-    if (alias?.placeholder && !exact) scene.objects.delete(alias.name);
+    let key = objectStorageKey(scene.objects, object);
+    const old = scene.objects.get(key);
+    if (old?.placeholder && key !== object.name) {
+      scene.objects.delete(key);
+      key = object.name;
+    }
     // Re-parsing a scene must not recreate object state. A real object keeps its
     // State, Objzet depth, last rendered MULT reference and visibility; a placeholder
     // only carries State forward (theme of 0x407c14 / 0x407ffc: objects and State stay).
@@ -149,8 +159,8 @@ export class SceneLoader {
         if (old.visible !== undefined) object.visible = old.visible;
       }
     }
-    scene.objects.set(object.name,object);
-    if (!scene.declarations.includes(object.name)) scene.declarations.push(object.name);
+    scene.objects.set(key, object);
+    if (!scene.declarations.includes(key)) scene.declarations.push(key);
   }
 
   setMapBank(bank: number): void {
@@ -230,8 +240,9 @@ export class SceneLoader {
           ...(placeholder ? { placeholder: true } : {}),
           ...(image.kind === 'mult' ? { mult: { ...image.reference }, imageHidden: false } : image.kind === 'empty' ? { imageHidden: true } : image.kind === 'unassigned' ? { imageUnassigned: true } : {}),
         };
-        scene.objects.set(value.name, value);
-        if (!placeholder) scene.declarations.push(value.name);
+        const key = objectStorageKey(scene.objects, value);
+        scene.objects.set(key, value);
+        if (!placeholder) scene.declarations.push(key);
       }
       this.states.set(scene.id, scene);
     }

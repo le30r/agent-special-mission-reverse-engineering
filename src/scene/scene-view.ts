@@ -227,7 +227,8 @@ export class SceneView {
   capturePersistentState(): { hero: PersistentHeroState; objects: Map<string, SceneObjectState>; savedPosition: [number, number]; savedDirection: number } {
     const objects = new Map<string, SceneObjectState>();
     for (const [name, stored] of this.state.objects) {
-      const sprite = name.toUpperCase()==='MAINHERO' ? this.hero : this.objects.get(name)?.sprite;
+      const sprite = stored.kind === 'Active' || stored.kind === 'Light' ? undefined
+        : stored.name.toUpperCase()==='MAINHERO' ? this.hero : this.objects.get(stored.name)?.sprite;
       objects.set(name, {
         ...stored,
         ...(stored.mult ? { mult: { ...stored.mult } } : {}),
@@ -450,7 +451,7 @@ export class SceneView {
 
   private rememberMult(name: string, animationName: string, frame: number, record: MultObject): void {
     const reference = { file: animationName, frame, slot: record.slot, child: record.child };
-    const stored = this.state.objects.get(name);
+    const stored = findFrameTarget(this.state.objects, name);
     if (!stored) {
       this.state.objects.set(name, { name, state: 0, depth: this.objectDepth(name), mult: reference });
       return;
@@ -568,7 +569,7 @@ export class SceneView {
   setObjectDepth(name: string, depth: number, provenance: DepthProvenance = { kind: 'default', detail: 'unspecified' }): void {
     const target = findNamedObject(this.state.objects.values(), name);
     const stored = target ? setStateDepth(this.state, target.name, depth, provenance) : setStateDepth(this.state, name, depth, provenance);
-    const object = this.objects.get(stored.name);
+    const object = stored.kind === 'Active' || stored.kind === 'Light' ? undefined : this.objects.get(stored.name);
     if (object) { object.depth = stored.depth; object.sprite.zIndex = pixiDepthIndex(stored.depth); }
   }
 
@@ -605,7 +606,7 @@ export class SceneView {
   }
 
   private storeObjectTransform(name: string, sprite: Sprite): void {
-    const stored = findNamedObject(this.state.objects.values(), name);
+    const stored = findFrameTarget(this.state.objects, name);
     if (stored) { stored.transform = this.readTransform(sprite); stored.visible = sprite.visible; }
   }
 
@@ -872,11 +873,11 @@ export class SceneView {
   }
 
   private hitboxObjectInfo(name: string, x: number, y: number) {
-    const stored = this.state.objects.get(name);
     const target = this.hitboxObjectTargets().find((candidate) => candidate.name === name);
+    const stored = target ? findFrameTarget(this.state.objects, name) : findNamedObject(this.state.objects.values(), name);
     const activeDeclaration = findNamedObject(this.definition.active.values(), name);
     const lightDeclaration = findNamedObject(this.definition.lights.values(), name);
-    const isActive = Boolean(activeDeclaration?.rect);
+    const isActive = !target && Boolean(activeDeclaration?.rect);
     const activeHit = isActive && activeHitTest({ visible: this.activeVisible(name), rect: activeDeclaration!.rect! }, x - this.scrollX, y, this.scrollX, 0);
     const pixelReason = isActive ? activeHit ? undefined : this.activeVisible(name) ? 'outside Active rectangle' : 'hidden' : target ? hitRejectionReason(target, x, y) : 'no runtime image/geometry';
     const reason = !pixelReason && target?.depth === 0 ? 'zero depth (excluded by hit pipeline)' : pixelReason;
@@ -899,7 +900,7 @@ export class SceneView {
   hitboxSnapshot(screenX: number, screenY: number): { scene: number; scrollX: number; screen: [number, number]; world: [number, number]; objects: ReturnType<SceneView['hitboxObjectInfo']>[]; actives: Array<{ name: string; rect: { left: number; top: number; right: number; bottom: number }; visible: boolean; hit: boolean; reason?: string }>; clickTrace: string } {
     const world = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
     const ordered = orderedHitTargets(this.hitboxObjectTargets());
-    const names = new Set([...ordered.map((object) => object.name), ...this.definition.active.keys(), ...this.definition.lights.keys(), ...this.state.objects.keys(), ...this.skippedMultRecords]);
+    const names = new Set([...ordered.map((object) => object.name), ...this.definition.active.keys(), ...this.definition.lights.keys(), ...[...this.state.objects.values()].map(object => object.name), ...this.skippedMultRecords]);
     const objects = [...names].map((name) => this.hitboxObjectInfo(name, world[0], world[1]));
     const actives = [...this.definition.active.values()].filter((item) => item.rect).map((item) => {
       const visible = this.activeVisible(item.name);
@@ -966,7 +967,7 @@ export class SceneView {
     const heroIndex = this.world.getChildIndex(this.hero);
     const objects = [...this.objects.values()]
       .map((object) => {
-        const provenance = this.state.objects.get(object.name)?.depthProvenance;
+        const provenance = findFrameTarget(this.state.objects, object.name)?.depthProvenance;
         return {
           name: object.name,
           depth: object.depth,
