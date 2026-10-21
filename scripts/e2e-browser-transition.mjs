@@ -82,12 +82,34 @@ async function canvasRect() {
 }
 async function logicalClick(x, y) {
   const rect = await waitFor('canvas rect', canvasRect);
-  const clientX = rect.left + (x * rect.width) / logicalWidth;
-  const clientY = rect.top + (y * rect.height) / logicalHeight;
+  const clientX = rect.left + ((x + 0.5) * rect.width) / logicalWidth;
+  const clientY = rect.top + ((y + 0.5) * rect.height) / logicalHeight;
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: clientX, y: clientY });
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: clientX, y: clientY, button: 'left', buttons: 1, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clientX, y: clientY, button: 'left', buttons: 0, clickCount: 1 });
   console.log(`click logical (${x},${y}) -> client (${clientX.toFixed(1)},${clientY.toFixed(1)})`);
+}
+async function clickFrontmostActive(name) {
+  const point = await evaluate(`(() => {
+    const v=window.__sccDebug.view(), active=v.definition.active.get(${JSON.stringify(name)});
+    if(!active?.rect)return null;
+    const r=active.rect, sx0=Math.floor(r.left-v.scrollX)+1, sx1=Math.ceil(r.right-v.scrollX)-1;
+    const cx=Math.floor((r.left+r.right)/2-v.scrollX),cy=Math.floor((r.top+r.bottom)/2);
+    if(v.hitboxSnapshot(cx,cy).selectedTarget?.name===${JSON.stringify(name)}) return [cx,cy];
+    let best=null,score=Infinity;
+    for(let y=Math.floor(r.top)+1;y<Math.ceil(r.bottom);y+=2) for(let x=sx0;x<sx1;x+=2) {
+      if(v.hitboxSnapshot(x,y).selectedTarget?.name!==${JSON.stringify(name)})continue;
+      const next=(x-cx)**2+(y-cy)**2;if(next<score){best=[x,y];score=next;}
+    }
+    return best;
+  })()`);
+  assert(point, `${name} has a point selected by the unified picker`);
+  console.log(`${name} frontmost picker point=(${point.join(',')})`);
+  await logicalClick(point[0], point[1]);
+  await sleep(250);
+  const state = await evaluate(`(()=>{const v=window.__sccDebug.view();return{scene:v.definition.id,moving:v.moving,selected:v.selectedItem,target:v.hitboxSnapshot(${point[0]},${point[1]}).selectedTarget}})()`);
+  console.log(`${name} post-click state=${JSON.stringify(state)}`);
+  return point;
 }
 async function screenshot(name) {
   await mkdir(screenshotDir, { recursive: true });
@@ -141,7 +163,7 @@ try {
 
   // A scene-entry StartW owns the global busy flag until its continuation ends.
   text = await waitForPanel('scc.busy=false', 90000);
-  await logicalClick(768, 400);
+  await clickFrontmostActive('Goto_11');
   text = await waitForPanel('active=1', 90000);
   assert(text.includes('39->1:1[SCC]'), `Goto_11 -> Level 1 1 was an SCC Level, got:\n${text}`);
   assert(text.includes('init=[1:1,39:1]'), `Init ran once per scene, got:\n${text}`);
@@ -176,7 +198,7 @@ try {
   assert(text.includes('1->39:0[SCC]'), `second natural forward transition, got:\n${text}`);
   await screenshot('05-level39-after-bottle.png');
 
-  await logicalClick(768, 400);
+  await clickFrontmostActive('Goto_11');
   text = await waitForPanel('active=1', 30000);
   assert(text.includes('39->1:1[SCC]'), `second natural return, got:\n${text}`);
   assert(text.includes('init=[1:1,39:1]'), `no repeated Init, got:\n${text}`);

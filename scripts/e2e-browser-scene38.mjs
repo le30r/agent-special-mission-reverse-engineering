@@ -81,8 +81,10 @@ async function canvasRect() {
 }
 async function logicalClick(x, y) {
   const rect = await waitFor('canvas rect', canvasRect);
-  const clientX = rect.left + (x * rect.width) / logicalWidth;
-  const clientY = rect.top + (y * rect.height) / logicalHeight;
+  // Hit geometry is evaluated at logical pixel coordinates. Click the pixel
+  // center so browser/CSS coordinate conversion cannot round into its neighbor.
+  const clientX = rect.left + ((x + 0.5) * rect.width) / logicalWidth;
+  const clientY = rect.top + ((y + 0.5) * rect.height) / logicalHeight;
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: clientX, y: clientY });
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: clientX, y: clientY, button: 'left', buttons: 1, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clientX, y: clientY, button: 'left', buttons: 0, clickCount: 1 });
@@ -151,9 +153,9 @@ try {
 
   // 5) Click the now-visible Lec_v statue. Its Case 1 runs Goto/StartW Goto2/Level 38 0.
   const afterCutScroll = scrollOf(text);
-  const lecScreenX = 340.84 - afterCutScroll;
-  assert(lecScreenX > 5 && lecScreenX < 790, `Lec_v clickable, scroll=${afterCutScroll}, x=${lecScreenX}`);
-  await logicalClick(lecScreenX, 301);
+  const lecPoint = await evaluate(`(()=>{const v=window.__sccDebug.view(),o=v.objects.get('Lec_v');if(!o)return null;for(let y=Math.floor(o.sprite.y-o.height/2)+1;y<o.sprite.y+o.height/2;y+=3)for(let x=Math.floor(o.sprite.x-o.width/2)+1;x<o.sprite.x+o.width/2;x+=3){const sx=Math.floor(x-v.scrollX),sy=Math.floor(y);if(v.hitboxSnapshot(sx,sy).selectedTarget?.name==='Lec_v')return [sx,sy]}return null})()`);
+  assert(lecPoint, `Lec_v has a point selected by the unified picker, scroll=${afterCutScroll}`);
+  await logicalClick(lecPoint[0], lecPoint[1]);
 
   text = await waitForPanel('active=38', 60000);
   assert(text.includes('entry=portal[0]'), `Level38 entered through Level 38 0 -> Portal[0], got:\n${text}`);

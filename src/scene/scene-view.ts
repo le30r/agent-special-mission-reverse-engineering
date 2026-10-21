@@ -11,7 +11,7 @@ import type { SceneEntry } from './scene-entry';
 import { cachedBackground, cachedExternalTexture, resolvedTexture, type ExternalTexture } from './textures';
 import { activeHitTest, worldPointFromScreen } from './active-hit';
 import { applyObjectVisibility, assignImageReference } from './object-visibility';
-import { firstHitTarget, hitRejectionReason, orderedHitTargets, type DepthHitTarget } from './object-hit';
+import { pickSceneTarget, sceneHitRejection, type DepthHitTarget, type HitPoint, type UnifiedHitCandidate } from './object-hit';
 import { findFrameTarget } from './mult-target';
 import { findNamedObject } from './object-identity';
 import { multHitPixels } from '../mult/hit-pixels';
@@ -752,13 +752,53 @@ export class SceneView {
     movement.lastTime = elapsedNow;
   }
 
-  /**
-   * Original scene click path: `Active` hit-test first with RAW screen coordinates
-   * (scroll is subtracted inside `activeHitTest` exactly once), then the pixel
-   * hit-test of every base Object in reverse painter order, then click-to-walk.
-   * `Active` and base Objects are still tested in two phases rather than one merged
-   * depth list; this is a documented approximation.
-   */
+  /** Shared runtime registry feeds click selection and the hover/debug inspector. */
+  private sceneHitCandidates(): UnifiedHitCandidate[] {
+    const objectByName = new Map(this.hitboxObjectTargets().map(target => [target.name.toUpperCase(), target]));
+    const candidates: UnifiedHitCandidate[] = [];
+    let order = 0;
+    for (const stored of this.state.objects.values()) {
+      const name = stored.name;
+      const kind = stored.kind ?? 'Object';
+      if (kind === 'Active') {
+        const declaration = findNamedObject(this.definition.active.values(), name);
+        const rect = stored.rect ?? declaration?.rect;
+        if (rect) candidates.push({ identity: `${kind}:${name}`, name, kind, depth: stored.depth, order: order++, active: { visible: stored.visible ?? false, rect } });
+      } else if (kind === 'Light') {
+        candidates.push({ identity: `${kind}:${name}`, name, kind, depth: stored.depth, order: order++ });
+      } else {
+        const object = objectByName.get(name.toUpperCase());
+        const depth = name.toUpperCase() === 'MAINHERO' ? this.heroDepth : stored.depth;
+        candidates.push({ identity: `Object:${name}`, name, kind: 'Object', depth, order: order++, ...(object ? { object } : {}) });
+      }
+    }
+    const registered = new Set(candidates.map(candidate => candidate.name.toUpperCase()));
+    for (const object of this.objects.values()) {
+      if (registered.has(object.name.toUpperCase())) continue;
+      candidates.push({ identity: `Object:${object.name}`, name: object.name, kind: 'Object', depth: object.depth, order: order++, object: {
+        x: object.sprite.x, y: object.sprite.y, width: object.width, height: object.height, visible: object.sprite.visible,
+        removed: object.removed, hitPixels: object.hitPixels,
+      } });
+      registered.add(object.name.toUpperCase());
+    }
+    if (this.heroHitImage && !registered.has('MAINHERO')) {
+      const { width, height, hitPixels } = this.heroHitImage;
+      candidates.push({ identity: 'Object:Mainhero', name: 'Mainhero', kind: 'Object', depth: this.heroDepth, order: order++, object: {
+        x: this.hero.x + (0.5 - this.hero.anchor.x) * width * this.hero.scale.x,
+        y: this.hero.y + (0.5 - this.hero.anchor.y) * height * this.hero.scale.y,
+        width, height, scaleX: this.hero.scale.x, scaleY: this.hero.scale.y,
+        visible: this.hero.visible, removed: false, hitPixels,
+      } });
+    }
+    return candidates;
+  }
+
+  private hitPoint(screenX: number, screenY: number): HitPoint {
+    const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
+    return { screenX, screenY, worldX, worldY, scrollX: this.scrollX };
+  }
+
+  /** Left-click target selection; right-click remains on its existing path. */
   pointerDown(screenX: number, screenY: number): void {
     if (this.scc.busy) {
       if (this.hitboxDebugEnabled) {
@@ -768,40 +808,20 @@ export class SceneView {
       return;
     }
     const selectedItem = this.selectedItem;
-    const [debugWorldX, debugWorldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
-    const debugTargets = this.hitboxDebugEnabled ? this.hitboxObjectTargets() : [];
-    const debugHits = this.hitboxDebugEnabled ? orderedHitTargets(debugTargets).map((candidate) => {
-      const reason = candidate.depth === 0 ? 'zero depth (excluded by hit pipeline)' : hitRejectionReason(candidate, debugWorldX, debugWorldY);
-      return { name: candidate.name, hit: reason === undefined, reason };
-    }) : [];
+    const point = this.hitPoint(screenX, screenY);
+    const { worldX: debugWorldX, worldY: debugWorldY } = point;
+    const candidates = this.sceneHitCandidates();
+    const debugHits = this.hitboxDebugEnabled ? [...candidates].sort((a, b) => Math.abs(a.depth)-Math.abs(b.depth)||a.order-b.order).map(candidate => ({ name: candidate.name, kind: candidate.kind, hit: sceneHitRejection(candidate, point) === undefined, reason: sceneHitRejection(candidate, point) })) : [];
     if (this.inputBlocked) {
       this.scc.dispatch('Plane', selectedItem);
       if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${debugWorldX},${debugWorldY})\nHit candidates: not evaluated\nActual selected target: Plane (input-blocked fallback)\nSCC handler lookup: ${this.handlerSummary('Plane', selectedItem)}\nState / Case: ${this.caseSummary('Plane', selectedItem)}\nProgram dispatched: ${this.scc.handlers.some((handler) => handler.event === 'Plane' && handler.itemId === selectedItem) ? 'yes' : 'no — rejected by handler/Case'}`;
       return;
     }
-    // Active rectangles share the native reverse-painter priority: a smaller
-    // absolute depth is in front. Declaration order alone lets Level29's None
-    // blocker (220) swallow the nested Slang2 hotspot (219).
-    const activeTargets = [...this.definition.active].sort(([a], [b]) =>
-      Math.abs(this.objectDepth(a)) - Math.abs(this.objectDepth(b)));
-    for (const [name, declaration] of activeTargets) {
-      if (!declaration.rect) continue;
-      const target = { visible: this.activeVisible(name), rect: declaration.rect };
-      if (!activeHitTest(target, screenX, screenY, this.scrollX, 0)) continue;
-      const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
-      const handled = this.scc.click(name, selectedItem);
-      if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${debugWorldX},${debugWorldY})\nHit candidates (pipeline phases): Active ${name} (Active phase precedes base Objects); Objects: ${debugHits.map((candidate) => `${candidate.name}=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: ${name}\nSCC handler lookup: ${this.handlerSummary(name, selectedItem)}\nState / Case: ${this.caseSummary(name, selectedItem)}\nProgram dispatched: ${handled ? 'yes' : 'no — rejected (no matching Click handler + Case)'}`;
-      if (handled && selectedItem !== 0) this.selectedItem = 0;
-      if (!handled && selectedItem === 0 && !this.inputBlocked) this.tryFault(name, worldX, worldY);
-      return;
-    }
     const [worldX, worldY] = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
-    // Every declared/runtime base Object participates, exactly like the original
-    // reverse painter-order loop. There is no per-object interaction whitelist.
-    const target = firstHitTarget(this.hitboxObjectTargets(), worldX, worldY);
+    const target = pickSceneTarget(candidates, point);
     if (target) {
       const handled = this.scc.click(target.name, selectedItem);
-      if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${worldX},${worldY})\nHit candidates (front to back): ${debugHits.map((candidate) => `${candidate.name}=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: ${target.name}\nSCC handler lookup: ${this.handlerSummary(target.name, selectedItem)}\nState / Case: ${this.caseSummary(target.name, selectedItem)}\nProgram dispatched: ${handled ? 'yes' : 'no — rejected (no matching Click handler + Case)'}`;
+      if (this.hitboxDebugEnabled) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${worldX},${worldY})\nHit candidates (unified front-to-back): ${debugHits.map((candidate) => `${candidate.name} [${candidate.kind}]=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: ${target.name} [${target.kind}]\nSCC handler lookup: ${this.handlerSummary(target.name, selectedItem)}\nState / Case: ${this.caseSummary(target.name, selectedItem)}\nProgram dispatched: ${handled ? 'yes' : 'no — rejected (no matching Click handler + Case)'}`;
       // Using an item consumes `scene+5` only when a Program matched (0x40a31c).
       if (selectedItem !== 0) {
         if (handled) this.selectedItem = 0;
@@ -811,7 +831,7 @@ export class SceneView {
       if (handled) return;
       if (selectedItem === 0 && !this.inputBlocked && this.tryFault(target.name, worldX, worldY)) return;
     }
-    if (this.hitboxDebugEnabled && !target) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${worldX},${worldY})\nHit candidates (front to back): ${debugHits.map((candidate) => `${candidate.name}=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: none\nSCC handler lookup: not run\nState / Case: not run\nProgram dispatched: no — rejected by hit-test`;
+    if (this.hitboxDebugEnabled && !target) this.lastHitboxClick = `Pointer screen=(${screenX},${screenY}) world=(${worldX},${worldY})\nHit candidates (unified front-to-back): ${debugHits.map((candidate) => `${candidate.name} [${candidate.kind}]=${candidate.hit ? 'hit' : `miss: ${candidate.reason}`}`).join('; ') || 'none'}\nActual selected target: none\nSCC handler lookup: not run\nState / Case: not run\nProgram dispatched: no — rejected by hit-test`;
     // The original clears active Programs even when no object was hit (0x40a1bc).
     this.scc.cancelActive();
     // `scene+5 != 0` suppresses click-to-walk; the selected item is only consumed
@@ -883,42 +903,42 @@ export class SceneView {
     return this.state.objects.get(name)?.state ?? this.scc.states.get(name) ?? 0;
   }
 
-  private hitboxObjectInfo(name: string, x: number, y: number) {
+  private hitboxObjectInfo(name: string, point: HitPoint) {
     const target = this.hitboxObjectTargets().find((candidate) => candidate.name === name);
+    const candidate = this.sceneHitCandidates().find(item => item.name === name);
     const stored = target ? findFrameTarget(this.state.objects, name) : findNamedObject(this.state.objects.values(), name);
-    const activeDeclaration = findNamedObject(this.definition.active.values(), name);
-    const lightDeclaration = findNamedObject(this.definition.lights.values(), name);
-    const isActive = !target && Boolean(activeDeclaration?.rect);
-    const activeHit = isActive && activeHitTest({ visible: this.activeVisible(name), rect: activeDeclaration!.rect! }, x - this.scrollX, y, this.scrollX, 0);
-    const pixelReason = isActive ? activeHit ? undefined : this.activeVisible(name) ? 'outside Active rectangle' : 'hidden' : target ? hitRejectionReason(target, x, y) : 'no runtime image/geometry';
-    const reason = !pixelReason && target?.depth === 0 ? 'zero depth (excluded by hit pipeline)' : pixelReason;
+    const reason = candidate ? sceneHitRejection(candidate, point) : 'no runtime registry entry';
+    const hit = Boolean(candidate && reason === undefined);
     const handlers = this.scc.handlers.filter((handler) => handler.event === name);
     const hasCase = handlers.some((handler) => handler.itemId === this.selectedItem && handler.programs.has(this.handlerState(handler.stateObject, handler.stateScene)));
     return {
-      name, kind: stored?.kind ?? (isActive ? 'Active' : lightDeclaration ? 'Light' : 'Object'),
-      state: stored?.state ?? 0, depth: target?.depth ?? stored?.depth ?? 0, cursorId: stored?.cursorId ?? this.definition.objects.get(name)?.cursorId,
-      visible: target ? target.visible && !target.removed : stored?.visible ?? false,
+      name, kind: candidate?.kind ?? stored?.kind ?? 'Object',
+      state: stored?.state ?? 0, depth: candidate?.depth ?? stored?.depth ?? 0, cursorId: stored?.cursorId ?? this.definition.objects.get(name)?.cursorId,
+      visible: candidate?.kind === 'Object' ? Boolean(candidate.object?.visible && !candidate.object.removed) : stored?.visible ?? false,
       mult: stored?.mult ? `${stored.mult.file} frame=${stored.mult.frame} slot=${stored.mult.slot} child=${stored.mult.child}` : stored?.imageHidden ? 'empty (Hide)' : 'none',
-      hasClickHandlers: handlers.length > 0, caseMatch: hasCase, hit: isActive ? activeHit : target ? !reason : false, rejection: reason,
+      hasClickHandlers: handlers.length > 0, caseMatch: hasCase, hit, rejection: reason,
       case: handlers.length ? this.caseSummary(name, this.selectedItem) : `no Click handlers; selected item=${this.selectedItem}`,
       x: target?.x ?? stored?.transform?.x, y: target?.y ?? stored?.transform?.y,
-      width: target ? target.width * Math.abs(target.scaleX ?? 1) : activeDeclaration?.rect ? activeDeclaration.rect.right - activeDeclaration.rect.left : undefined,
-      height: target ? target.height * Math.abs(target.scaleY ?? 1) : activeDeclaration?.rect ? activeDeclaration.rect.bottom - activeDeclaration.rect.top : undefined,
-      withinGeometry: Boolean(target && Math.abs(x - target.x) < target.width * Math.abs(target.scaleX ?? 1) / 2 && Math.abs(y - target.y) < target.height * Math.abs(target.scaleY ?? 1) / 2) || Boolean(activeDeclaration?.rect && x > activeDeclaration.rect.left && x < activeDeclaration.rect.right && y > activeDeclaration.rect.top && y < activeDeclaration.rect.bottom),
+      width: target ? target.width * Math.abs(target.scaleX ?? 1) : candidate?.active ? candidate.active.rect.right - candidate.active.rect.left : undefined,
+      height: target ? target.height * Math.abs(target.scaleY ?? 1) : candidate?.active ? candidate.active.rect.bottom - candidate.active.rect.top : undefined,
+      withinGeometry: Boolean(target && Math.abs(point.worldX - target.x) < target.width * Math.abs(target.scaleX ?? 1) / 2 && Math.abs(point.worldY - target.y) < target.height * Math.abs(target.scaleY ?? 1) / 2) || Boolean(candidate?.active?.rect && point.worldX > candidate.active.rect.left && point.worldX < candidate.active.rect.right && point.worldY > candidate.active.rect.top && point.worldY < candidate.active.rect.bottom),
     };
   }
 
-  hitboxSnapshot(screenX: number, screenY: number): { scene: number; scrollX: number; screen: [number, number]; world: [number, number]; objects: ReturnType<SceneView['hitboxObjectInfo']>[]; actives: Array<{ name: string; rect: { left: number; top: number; right: number; bottom: number }; visible: boolean; hit: boolean; reason?: string }>; clickTrace: string } {
-    const world = worldPointFromScreen(screenX, screenY, this.scrollX, 0);
-    const ordered = orderedHitTargets(this.hitboxObjectTargets());
-    const names = new Set([...ordered.map((object) => object.name), ...this.definition.active.keys(), ...this.definition.lights.keys(), ...[...this.state.objects.values()].map(object => object.name), ...this.skippedMultRecords]);
-    const objects = [...names].map((name) => this.hitboxObjectInfo(name, world[0], world[1]));
+  hitboxSnapshot(screenX: number, screenY: number): { scene: number; scrollX: number; screen: [number, number]; world: [number, number]; selectedTarget?: { identity: string; name: string; kind: string }; objects: ReturnType<SceneView['hitboxObjectInfo']>[]; actives: Array<{ name: string; rect: { left: number; top: number; right: number; bottom: number }; visible: boolean; hit: boolean; reason?: string }>; clickTrace: string } {
+    const point = this.hitPoint(screenX, screenY);
+    const world: [number, number] = [point.worldX, point.worldY];
+    const candidates = this.sceneHitCandidates();
+    const ordered = [...candidates].sort((a,b)=>Math.abs(a.depth)-Math.abs(b.depth)||a.order-b.order);
+    const names = new Set([...ordered.map((object) => object.name), ...this.skippedMultRecords]);
+    const objects = [...names].map((name) => this.hitboxObjectInfo(name, point));
+    const selected = pickSceneTarget(candidates, point);
     const actives = [...this.definition.active.values()].filter((item) => item.rect).map((item) => {
       const visible = this.activeVisible(item.name);
       const hit = activeHitTest({ visible, rect: item.rect! }, screenX, screenY, this.scrollX, 0);
       return { name: item.name, rect: item.rect!, visible, hit, ...(visible && !hit ? { reason: 'outside Active rectangle' } : !visible ? { reason: 'hidden' } : {}) };
     });
-    return { scene: this.definition.id, scrollX: this.scrollX, screen: [screenX, screenY], world, objects, actives, clickTrace: this.lastHitboxClick };
+    return { scene: this.definition.id, scrollX: this.scrollX, screen: [screenX, screenY], world, ...(selected ? { selectedTarget: { identity: selected.identity, name: selected.name, kind: selected.kind } } : {}), objects, actives, clickTrace: this.lastHitboxClick };
   }
 
   /** Render-only references; callers must not feed these back into input/SCC. */

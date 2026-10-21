@@ -17,8 +17,8 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(description,predicate,timeout=90000){const end=Date.now()+timeout;let last;while(Date.now()<end){last=await predicate();if(last)return last;await sleep(100);}throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(last)}`);}
 function assert(ok,message){if(!ok)throw new Error(`Assertion failed: ${message}`);}
 async function canvasClick(screenX,screenY){const p=await evaluate(`(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return{x:r.left+(${screenX})*r.width/800,y:r.top+(${screenY})*r.height/600}})()`);for(const[type,buttons]of[['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await send('Input.dispatchMouseEvent',{type,x:p.x,y:p.y,button:'left',buttons,clickCount:1});}
-async function worldClick(worldX,worldY){const p=await evaluate(`(()=>{const v=window.__sccDebug.view(),r=document.querySelector('canvas').getBoundingClientRect();return{x:r.left+(${worldX}-v.scrollX+.25)*r.width/800,y:r.top+(${worldY}+.25)*r.height/600}})()`);for(const[type,buttons]of[['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await send('Input.dispatchMouseEvent',{type,x:p.x,y:p.y,button:'left',buttons,clickCount:1});}
-async function activeClick(name){const p=await evaluate(`(()=>{const v=window.__sccDebug.view(),d=v.definition.active.get(${JSON.stringify(name)});if(!d?.rect)return null;return[(d.rect.left+d.rect.right)/2,(d.rect.top+d.rect.bottom)/2]})()`);assert(p,`Active ${name} has a rect`);await worldClick(...p);}
+async function worldClick(worldX,worldY){const p=await evaluate(`(()=>{const v=window.__sccDebug.view(),r=document.querySelector('canvas').getBoundingClientRect();return{x:r.left+(${worldX}-v.scrollX+.5)*r.width/800,y:r.top+(${worldY}+.5)*r.height/600}})()`);for(const[type,buttons]of[['mouseMoved',0],['mousePressed',1],['mouseReleased',0]])await send('Input.dispatchMouseEvent',{type,x:p.x,y:p.y,button:'left',buttons,clickCount:1});}
+async function activeClick(name){const p=await evaluate(`(()=>{const v=window.__sccDebug.view(),d=v.definition.active.get(${JSON.stringify(name)});if(!d?.rect)return null;const r=d.rect;for(let y=Math.floor(r.top)+1;y<Math.ceil(r.bottom);y+=2)for(let x=Math.floor(r.left-v.scrollX)+1;x<Math.ceil(r.right-v.scrollX);x+=2)if(v.hitboxSnapshot(x,y).selectedTarget?.name===${JSON.stringify(name)})return[x+v.scrollX,y];return null})()`);assert(p,`Active ${name} has a point selected by the unified picker`);await worldClick(...p);}
 const view=`(()=>{const v=window.__sccDebug.view();return{scene:v.definition.id,scrollX:v.scrollX,initialized:v.state.initialized,interface:v.state.objects.get('Interface')?.state,busy:v.scc.busy,moving:v.moving,inventory:[...v.scc.inventory],kSlip:v.player.state('K_slip'),programs:v.scc.programs.map(p=>({active:p.active,waiting:p.waiting,waitName:p.waitName,pc:p.pc,commands:p.program.commands}))}})()`;
 const state=`(()=>{const v=window.__sccDebug.view();return{scene:v.definition.id,initialized:v.state.initialized,interface:v.state.objects.get('Interface')?.state,inventory:[...v.scc.inventory],objects:[...v.state.objects.values()]}})()`;
 try {
@@ -42,6 +42,11 @@ try {
   }
   const healthy=await evaluate(state);
   assert(healthy.initialized&&healthy.interface===1,'StartW continuation executed State Interface 1');
+
+  const overlap=await evaluate(`(()=>{const v=window.__sccDebug.view(),saved=v.scrollX;v.scrollX=500;v.root.x=-500;const report=v.hitboxSnapshot(45,502);v.scrollX=saved;v.root.x=-saved;return{target:report.selectedTarget,world:report.world,interface:v.state.objects.get('Interface')?.state,scroll:report.scrollX}})()`);
+  assert(overlap.scroll===500&&overlap.world[0]===545,'Level3 overlap probe uses screen (45,502), world (545,502), scroll=500');
+  assert(overlap.target?.name==='Iach_click','unified picker chooses Iach_click ahead of overlapping Forma at scroll=500');
+  assert(overlap.interface===1,'Level3 pickup Case precondition remains Interface.state=1');
 
   const pickupPoints=[['Plocat',870,321,8,13],['Iach_click',544,516,9,34],['Stool',977,479,10,9]];
   for(const[name,x,y,item]of pickupPoints){
@@ -93,5 +98,5 @@ try {
   await waitFor('post-roundtrip scene ready',async()=>await evaluate('window.__saveLoadDebug.canSave().ok'));
   const final=await evaluate(state);
   assert(final.interface===1&&[8,9,10].every(item=>final.inventory.filter(x=>x===item).length===1),'Save/Load roundtrip preserves Level3 Interface and pickups');
-  console.log('Level3 busy E2E passed: K_slip click protection, real item 8/9/10 pickups and repeats, Interface=0 legacy restore, portal re-entry, and Save/Load.');
+  console.log('Level3 busy E2E passed: K_slip click protection, unified Iach_click/Forma overlap at scroll=500, real item 8/9/10 pickups and repeats, Interface=0 legacy restore, portal re-entry, and Save/Load.');
 } finally {socket.close();}

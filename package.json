@@ -27,6 +27,7 @@
     "e2e:browser:save-load-ui": "node scripts/e2e-browser-all.mjs e2e-browser-save-load-ui.mjs",
     "e2e:browser:save-state-identities": "node scripts/e2e-browser-all.mjs e2e-browser-save-state-identities.mjs",
     "e2e:browser:hitbox": "node scripts/e2e-browser-all.mjs e2e-browser-hitbox.mjs",
+    "e2e:browser:unified-hit": "node scripts/e2e-browser-all.mjs e2e-browser-unified-hit.mjs",
     "e2e:browser:all": "node scripts/e2e-browser-all.mjs",
     "e2e:browser:level39-transitions": "node scripts/e2e-browser-level39-transitions.mjs",
     "e2e:browser:catalog": "node scripts/e2e-browser-catalog.mjs",

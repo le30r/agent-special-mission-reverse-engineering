@@ -27,7 +27,7 @@ const send = page.send;
 async function evaluate(expression) { const r=await send('Runtime.evaluate',{expression,returnByValue:true,awaitPromise:true}); if(r.exceptionDetails)throw new Error(r.exceptionDetails.text??'evaluation failed'); return r.result.value; }
 async function panel() { return evaluate("document.querySelector('.scene-debug')?.textContent ?? ''"); }
 async function waitFor(what,predicate,timeout=45000) { const deadline=Date.now()+timeout; let last; while(Date.now()<deadline){last=await predicate();if(last)return last;await sleep(100);} throw new Error(`Timed out waiting for ${what}: ${JSON.stringify(last)}`); }
-async function click(x,y) { const rect=await evaluate(`(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height};})()`);const cx=rect.left+x*rect.width/800,cy=rect.top+y*rect.height/600;await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:cx,y:cy});await send('Input.dispatchMouseEvent',{type:'mousePressed',x:cx,y:cy,button:'left',buttons:1,clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:cx,y:cy,button:'left',buttons:0,clickCount:1}); }
+async function click(x,y) { const rect=await evaluate(`(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height};})()`);const cx=rect.left+(x+.5)*rect.width/800,cy=rect.top+(y+.5)*rect.height/600;await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:cx,y:cy});await send('Input.dispatchMouseEvent',{type:'mousePressed',x:cx,y:cy,button:'left',buttons:1,clickCount:1});await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:cx,y:cy,button:'left',buttons:0,clickCount:1}); }
 
 try {
   await send('Page.enable'); await send('Runtime.enable');
@@ -87,25 +87,32 @@ try {
   // Enter Level29 through the real lazy scene loader and exercise both native choices.
   await evaluate("document.getElementById('debug-scene-29').click()");
   await waitFor('Level29 loaded', async () => { const p=await panel(); return p.includes('active=29') ? p : false; });
+  await waitFor('Level29 Mainhero movement settled', () => evaluate('!window.__sccDebug.view().moving'), 45000);
+  // This integration case isolates Janitor's Fault voice selection from the
+  // player's inherited Level1 walk path, which can otherwise cross the target.
+  await evaluate("(()=>{const v=window.__sccDebug.view();v.movement=undefined;v.hero.visible=false;v.heroHitImage=undefined})()");
+  await evaluate("window.__sccDebug.view().hitboxDebugEnabled = true");
   const janitor = await evaluate(`(() => {
     const v=window.__sccDebug.view(), object=v.objects.get('Janitor');
     if(!object)return {object:null};
-    const targets=[...v.objects.values()].map((o)=>({name:o.name,x:o.sprite.x,y:o.sprite.y,width:o.width,height:o.height,visible:o.sprite.visible,removed:o.removed,hitPixels:o.hitPixels,depth:o.depth,order:o.order}));
-    const ordered=[...targets].sort((a,b)=>Math.abs(a.depth)-Math.abs(b.depth)||a.order-b.order);
-    const hit=(t,x,y)=>{if(!t.visible||t.removed||!t.hitPixels)return false;const ix=Math.floor(x-(t.x-t.width/2)),iy=Math.floor(y-(t.y-t.height/2));return ix>=0&&iy>=0&&ix<t.width&&iy<t.height&&t.hitPixels[(iy*t.width+ix)*4+3]!==0;};
     let point;
-    for(let y=Math.ceil(object.sprite.y-object.height/2);y<object.sprite.y+object.height/2&&!point;y+=2)for(let x=Math.ceil(object.sprite.x-object.width/2);x<object.sprite.x+object.width/2;x+=2){const sx=x-v.scrollX;const activeHit=[...v.definition.active].some(([name,d])=>v.activeVisible(name)&&d.rect&&sx>d.rect.left-v.scrollX&&sx<d.rect.right-v.scrollX&&y>d.rect.top&&y<d.rect.bottom);if(activeHit)continue;const front=ordered.find((t)=>Math.abs(t.depth)!==0&&hit(t,x,y));if(front?.name==='Janitor'){point=[sx,y];break;}}
+    for(let y=Math.ceil(object.sprite.y-object.height/2);y<object.sprite.y+object.height/2&&!point;y+=2)for(let x=Math.ceil(object.sprite.x-object.width/2);x<object.sprite.x+object.width/2;x+=2){const sx=Math.floor(x-v.scrollX);if(v.hitboxSnapshot(sx,y).selectedTarget?.name==='Janitor'){point=[sx,y];break;}}
     return {object:v.objectDebug('Janitor'),scroll:v.scrollX,point,actives:[...v.definition.active].map(([name,d])=>({name,visible:v.activeVisible(name),rect:d.rect}))};
   })()`);
   assert(janitor.object && !janitor.object.removed && janitor.object.width>0, `Janitor has a hittable layout image: ${JSON.stringify(janitor)}`);
   assert(janitor.point, `Janitor has a topmost opaque hit pixel: ${JSON.stringify(janitor)}`);
-  const [janitorX,janitorY] = janitor.point;
   const expectedPaths = ['002.wav', 'Sound065.wav'];
   for (const [rand, pathEnd] of [[0, expectedPaths[0]], [8192, expectedPaths[1]]]) {
     await evaluate(`window.__sccDebug.view().setFaultRand15(() => ${rand})`);
+    const currentJanitorPoint = await evaluate(`(()=>{const v=window.__sccDebug.view(),o=v.objects.get('Janitor'),h=v.objects.get('Mainhero');if(!o)return null;let best=null,bestDistance=-1;for(let y=Math.ceil(o.sprite.y-o.height/2)+3;y<o.sprite.y+o.height/2-3;y+=3)for(let x=Math.ceil(o.sprite.x-o.width/2)+3;x<o.sprite.x+o.width/2-3;x+=3){const sx=Math.floor(x-v.scrollX);let stable=true;for(let dy=-2;dy<=2&&stable;dy++)for(let dx=-2;dx<=2;dx++)if(v.hitboxSnapshot(sx+dx,y+dy).selectedTarget?.name!=='Janitor'){stable=false;break}if(!stable)continue;const distance=h?Math.hypot(sx-(h.sprite.x-v.scrollX),y-h.sprite.y):0;if(distance>bestDistance){best=[sx,y];bestDistance=distance}}return best})()`);
+    assert(currentJanitorPoint, `Janitor remains frontmost after previous Fault: ${pathEnd}`);
+    const preClickTarget=await evaluate(`window.__sccDebug.view().hitboxSnapshot(${currentJanitorPoint[0]},${currentJanitorPoint[1]}).selectedTarget`);
     const beforeCount=(await evaluate('window.__audioDebug.view().audio.diagnostics()')).length;
-    await click(janitorX, janitorY);
-    const chosen=await waitFor(`Janitor ${pathEnd}`,async()=>{const d=await evaluate('window.__audioDebug.view().audio.diagnostics()'),a=await evaluate('window.__faultAudioTrace');const voice=d.slice(beforeCount).find((e)=>e.event==='voice.playing'&&(e.url??'').toLowerCase().endsWith(pathEnd.toLowerCase()));const source=voice&&d.slice(beforeCount).find((e)=>String(e.event).startsWith('source.start.ok')&&e.url===voice.url&&e.contextState==='running');const pcm=source&&a.filter((e)=>e.event==='source.start'&&e.pcmNonzero&&e.state==='running').sort((x,y)=>Math.abs(x.time-source.time)-Math.abs(y.time-source.time))[0];return voice&&source&&pcm&&Math.abs(pcm.time-source.time)<1000?{voice,source,pcm:{duration:pcm.duration,nonzero:true}}:false;},30000);
+    await click(...currentJanitorPoint);
+    console.log('Janitor click target', JSON.stringify({rand,point:currentJanitorPoint,preClickTarget,postClickTarget:await evaluate(`window.__sccDebug.view().hitboxSnapshot(${currentJanitorPoint[0]},${currentJanitorPoint[1]}).selectedTarget`)}));
+    let chosen;
+    try { chosen=await waitFor(`Janitor ${pathEnd}`,async()=>{const d=await evaluate('window.__audioDebug.view().audio.diagnostics()'),a=await evaluate('window.__faultAudioTrace');const voice=d.slice(beforeCount).find((e)=>e.event==='voice.playing'&&(e.url??'').toLowerCase().endsWith(pathEnd.toLowerCase()));const source=voice&&d.slice(beforeCount).find((e)=>String(e.event).startsWith('source.start.ok')&&e.url===voice.url&&e.contextState==='running');const pcm=source&&a.filter((e)=>e.event==='source.start'&&e.pcmNonzero&&e.state==='running').sort((x,y)=>Math.abs(x.time-source.time)-Math.abs(y.time-source.time))[0];return voice&&source&&pcm&&Math.abs(pcm.time-source.time)<1000?{voice,source,pcm:{duration:pcm.duration,nonzero:true}}:false;},30000); }
+    catch(error) { console.error('Fault playback diagnostic', JSON.stringify({rand,pathEnd,point:currentJanitorPoint,diagnostics:(await evaluate('window.__audioDebug.view().audio.diagnostics()')).slice(beforeCount).slice(-20),state:await evaluate(`(()=>{const v=window.__sccDebug.view();return {target:v.hitboxSnapshot(${currentJanitorPoint[0]},${currentJanitorPoint[1]}).selectedTarget,trace:v.hitboxSnapshot(${currentJanitorPoint[0]},${currentJanitorPoint[1]}).clickTrace,active:v.scc.programs.at(-1)?.active,busy:v.scc.busy,speak:v.player.isActive('Speak')}})()`) })); throw error; }
     assert(chosen, `deterministic rand15=${rand} selected and played unmuted ${pathEnd} with nonzero PCM`);
     await waitFor(`Janitor ${pathEnd} completion`,async()=>{const d=await evaluate('window.__audioDebug.view().audio.diagnostics()');const v=await evaluate(`(()=>{const v=window.__sccDebug.view();return {active:v.scc.programs.at(-1)?.active,busy:v.scc.busy,speak:v.player.isActive('Speak')}})()`);return d.slice(beforeCount).some((e)=>e.event==='voice.playback-finished'&&(e.url??'').toLowerCase().endsWith(pathEnd.toLowerCase()))&&!v.active&&!v.busy&&!v.speak;},30000);
   }

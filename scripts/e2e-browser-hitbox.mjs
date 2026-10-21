@@ -41,7 +41,7 @@ try {
   assert(hovered.world[0] === point[0] + hovered.scroll, 'world X equals screen X plus scene scroll exactly once');
   assert(hovered.style === 'none', 'debug panel/overlay do not intercept mouse events');
   assert(hovered.graphicsMode === 'none' && hovered.graphicsCommands > 0 && hovered.activeCount > 0, `Pixi Object/Active overlay is drawn as a non-interactive layer: ${JSON.stringify({mode:hovered.graphicsMode,commands:hovered.graphicsCommands,actives:hovered.activeCount})}`);
-  assert(hovered.hits[0] === 'Stool' && hovered.hits.length >= 1, `diagnostic respects frontmost hit candidate: ${hovered.hits}`);
+  assert(hovered.o.name === 'Stool' && hovered.hits.includes('Stool'), `diagnostic exposes shared picker target and overlapping geometry: ${JSON.stringify({target:hovered.o.name,hits:hovered.hits})}`);
   assert(hovered.state.length === initial.state.length && hovered.programs === initial.programs, 'hover observation does not mutate SCC state or program count');
   assert(hovered.panel.includes('Stool') && hovered.panel.includes('Case 1'), 'Level3 inspector reports stool and its selected Case');
   await move(point[0], point[1]);
@@ -51,7 +51,7 @@ try {
   const trace = await waitFor('click chain', () => evaluate("(()=>{const t=window.__sccDebug.view().hitboxSnapshot(" + point[0] + "," + point[1] + ").clickTrace;return t.includes('Pointer screen=')?t:false})()"));
   assert(trace.includes('Actual selected target: Stool'), `click chain records the actual selected target (not merely visual overlap): ${trace}`);
   assert(trace.includes('SCC handler lookup') && trace.includes('Program dispatched: yes'), `click chain confirms SCC Case dispatch: ${trace}`);
-  assert(trace.includes('Hit candidates (front to back):'), 'click chain lists every ordered hit candidate');
+  assert(trace.includes('Hit candidates (unified front-to-back):'), 'click chain lists every ordered unified candidate');
   assert(trace.includes('Case 1: match'), 'Level3 stool click dispatches its valid Interface Case 1');
   console.log(JSON.stringify({ level: 3, hovered: Object.fromEntries(Object.entries(hovered.o).filter(([key]) => key !== 'hitPixels')), scroll: hovered.scroll, world: hovered.world, clickTrace: trace }, null, 2));
   console.log('CHROMIUM HITBOX E2E PASSED');

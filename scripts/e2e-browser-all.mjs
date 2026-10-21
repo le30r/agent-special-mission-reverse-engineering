@@ -73,6 +73,8 @@ try {
   const suite = [
     'e2e-browser-transition.mjs',
     'e2e-browser-level3-busy.mjs',
+    'e2e-browser-unified-hit.mjs',
+    'e2e-browser-hitbox.mjs',
     'e2e-browser-save-load.mjs',
     'e2e-browser-save-load-ui.mjs',
     'e2e-browser-save-state-identities.mjs',
@@ -86,7 +88,7 @@ try {
     'e2e-browser-fault.mjs',
   ];
   const startAt = process.argv[2] ?? process.env.E2E_SUITE_FROM;
-  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-save-state-identities.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs', 'e2e-browser-save-load-performance.mjs']);
+  const standalone = new Set(['e2e-browser-lora.mjs', 'e2e-browser-inventory-combination.mjs', 'e2e-browser-level21-ladder.mjs', 'e2e-browser-save-load.mjs', 'e2e-browser-save-load-ui.mjs', 'e2e-browser-save-state-identities.mjs', 'e2e-browser-unified-hit.mjs', 'e2e-browser-hitbox.mjs', 'e2e-browser-level3-busy.mjs', 'e2e-browser-save-load-performance.mjs']);
   const from = startAt ? suite.indexOf(startAt) : 0;
   if (startAt && from < 0 && !standalone.has(startAt)) throw new Error(`Unknown E2E suite start: ${startAt}`);
   const single = process.argv[2] && standalone.has(startAt);
@@ -108,7 +110,7 @@ try {
       }
     }
     await waitFor(`http://127.0.0.1:${cdpPort}/json/version`, 'Chromium CDP');
-    const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : script === 'e2e-browser-hitbox.mjs' ? `http://127.0.0.1:${port}/?debug=hitbox` : baseUrl;
+    const pageUrl = script === 'e2e-level39-columns.mjs' ? `http://127.0.0.1:${port}/?debug=depth` : ['e2e-browser-hitbox.mjs','e2e-browser-unified-hit.mjs'].includes(script) ? `http://127.0.0.1:${port}/?debug=hitbox` : baseUrl;
     await runE2e(script, pageUrl, artifacts);
     const finishedChrome = chromeChild;
     await stop(finishedChrome);
