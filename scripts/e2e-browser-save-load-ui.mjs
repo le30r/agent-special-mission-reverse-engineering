@@ -69,8 +69,10 @@ try {
   await send('Page.reload',{ignoreCache:true});
   await waitFor('fresh runtime after clearing slots',async()=>await evaluate('Boolean(window.__saveLoadDebug?.canSave().ok)'));
   assert(await evaluate("Array.from({length:6},(_,i)=>localStorage.getItem(`agent-revers.save.v1.slot.${i}`)).every(x=>x===null)"),'test profile slots are empty before file import');
-  await evaluate('document.activeElement instanceof HTMLElement && document.activeElement.blur()');
-  await fkey('F3');await waitFor('Load UI for file import',async()=>await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"),10000);
+  await send('Page.bringToFront');
+  await evaluate('window.focus();document.activeElement instanceof HTMLElement && document.activeElement.blur()');
+  await sleep(100);
+  await fkey('F3');await waitFor('Load UI for file import',async()=>await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"),30000);
   await clickSelector('button','Импортировать JSON');
   const documentTree=await send('DOM.getDocument');const fileNode=await send('DOM.querySelector',{nodeId:documentTree.root.nodeId,selector:'input[type="file"]'});
   await send('DOM.setFileInputFiles',{files:[exportPath],nodeId:fileNode.nodeId});

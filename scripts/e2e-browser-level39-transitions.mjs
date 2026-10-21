@@ -83,12 +83,15 @@ async function canvasRect() {
 }
 async function logicalClick(x, y) {
   const rect = await waitFor('canvas rect', canvasRect);
-  const clientX = rect.left + (x * rect.width) / logicalWidth;
-  const clientY = rect.top + (y * rect.height) / logicalHeight;
+  const clientX = rect.left + ((x + 0.5) * rect.width) / logicalWidth;
+  const clientY = rect.top + ((y + 0.5) * rect.height) / logicalHeight;
   await send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: clientX, y: clientY });
   await send('Input.dispatchMouseEvent', { type: 'mousePressed', x: clientX, y: clientY, button: 'left', buttons: 1, clickCount: 1 });
   await send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: clientX, y: clientY, button: 'left', buttons: 0, clickCount: 1 });
   console.log(`click logical (${Math.round(x)},${Math.round(y)})`);
+}
+async function pickerActivePoint(name) {
+  return await evaluate(`(()=>{const v=window.__sccDebug.view(),d=v.definition.active.get(${JSON.stringify(name)});if(!d?.rect)return null;const r=d.rect;for(let y=Math.floor(r.top)+1;y<Math.ceil(r.bottom);y+=2)for(let x=Math.floor(r.left-v.scrollX)+1;x<Math.ceil(r.right-v.scrollX);x+=2)if(v.hitboxSnapshot(x,y).selectedTarget?.name===${JSON.stringify(name)})return[x,y];return null})()`);
 }
 async function screenshot(name) {
   await mkdir(screenshotDir, { recursive: true });
@@ -120,7 +123,9 @@ try {
   assert(text.includes('scene=1152x600'), `Level39 width, got:\n${text}`);
 
   // Level39 Goto_40 Active: rect 445..520 x 230..430. At scroll 352 click (130,350).
-  await logicalClick(130, 350);
+  const goto40Point = await pickerActivePoint('Goto_40');
+  assert(goto40Point, 'Goto_40 has a point selected by the unified picker');
+  await logicalClick(...goto40Point);
   text = await waitForPanel('active=40', 90000);
   assert(text.includes('entry=portal[0]'), `Level 40 0 -> Portal[0], got:\n${text}`);
   assert(text.includes('init=[1:1,39:1,40:1]'), `Level40 Init ran once, got:\n${text}`);
@@ -133,8 +138,9 @@ try {
 
   // Level40 Goto_39 Active: rect 0..80 x 150..450. It runs Goport 0 then Level 39 1.
   text = await panel();
-  let returnScroll = scrollOf(text);
-  await logicalClick(Math.max(8, Math.min(790, 40 - returnScroll)), 300);
+  const goto39Point = await pickerActivePoint('Goto_39');
+  assert(goto39Point, 'Goto_39 has a point selected by the unified picker');
+  await logicalClick(...goto39Point);
   text = await waitForPanel('active=39', 90000);
   assert(text.includes('entry=portal[1]'), `Level 39 1 -> Portal[1], got:\n${text}`);
   assert(text.includes('init=[1:1,39:1,40:1]'), `no second Level39 Init, got:\n${text}`);
