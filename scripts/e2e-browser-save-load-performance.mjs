@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 import { readFile } from 'node:fs/promises';
 
 const cdp=(process.env.E2E_CDP??'http://127.0.0.1:9222').replace(/\/$/,'');
@@ -21,7 +22,7 @@ const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 async function waitFor(description,predicate,timeout=120000){const end=Date.now()+timeout;let last;while(Date.now()<end){last=await predicate();if(last)return last;await sleep(50);}throw new Error(`Timed out waiting for ${description}: ${JSON.stringify(last)}`);}
 function median(values){const sorted=[...values].sort((a,b)=>a-b);return sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;}
 try {
- await send('Page.enable');await send('Runtime.enable');await send('Page.navigate',{url});
+ await send('Page.enable');await send('Runtime.enable');await send('Page.navigate',{url});await skipStartupVideo(send,evaluate);
  await waitFor('save-load debug API',()=>evaluate('Boolean(window.__saveLoadDebug?.importSave)'));
  await evaluate(`(()=>{window.__saveLoadFetchFailures=[];const native=window.fetch.bind(window);window.fetch=async(...args)=>{try{return await native(...args)}catch(error){window.__saveLoadFetchFailures.push({url:String(args[0]),error:String(error)});throw error}}})()`);
  const records=[];

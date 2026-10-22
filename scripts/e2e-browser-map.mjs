@@ -103,6 +103,9 @@ async function captureWorld() {
 
 try {
   await send('Page.enable'); await send('Runtime.enable'); await send('Page.navigate', { url });
+  await waitFor('Level1 original Init Rolik1 barrier', async () => evaluate("window.__videoDebug?.controller.active && window.__videoDebug.controller.element?.src.includes('Rolik1.mp4')"));
+  await key('F1', 'F1', 112);
+  await waitFor('Level1 Init after F1 skips Rolik1', async () => evaluate("!window.__videoDebug.controller.active && window.__sccDebug.view()?.state.objects.get('Slip')?.state===1"));
   await waitFor('idle starting scene and map diagnostics', async () => {
     const state = await mapState();
     return state && (await evaluate('window.__sccDebug?.view()?.definition?.id === 1 && !window.__sccDebug.view().scc.busy'));

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /**
  * Loads every scene discovered by scripts/prepare-assets.mjs through the real
  * browser SceneAssetProvider and records whether the lazy loader can enter it.
@@ -73,6 +74,7 @@ try {
   await installE2EAudioPolicy(send);
   await send('Runtime.enable');
   await send('Page.navigate', { url: startUrl });
+  await skipStartupVideo(send,evaluate);
   await waitFor('initial Level1 panel', async () => {
     const text = await panel();
     return text.includes('active=1') ? text : false;

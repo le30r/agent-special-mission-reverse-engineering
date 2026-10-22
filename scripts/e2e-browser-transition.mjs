@@ -52,6 +52,10 @@ async function evaluate(expression) {
   if (result.exceptionDetails) throw new Error(result.exceptionDetails.text ?? 'Runtime.evaluate failed');
   return result.result.value;
 }
+async function key(keyName, code, windowsVirtualKeyCode) {
+  await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key: keyName, code, windowsVirtualKeyCode });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: keyName, code, windowsVirtualKeyCode });
+}
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 async function waitFor(description, predicate, timeoutMs = 25000) {
   const deadline = Date.now() + timeoutMs;
@@ -127,12 +131,16 @@ async function reload() {
     const text = await panel();
     return text.includes('SCENE DEBUG · active=1') ? text : false;
   }, 30000);
-  await sleep(500); // let the one-poll SclipW continuation complete
+  await skipStartupVideo();
+}
+async function skipStartupVideo() {
+  await waitFor('startup Rolik1 barrier', () => evaluate("window.__videoDebug?.controller.active && window.__videoDebug.controller.element?.src.includes('Rolik1.mp4')"));
+  await key('F1', 'F1', 112);
+  await waitFor('Level1 Init resumes after Rolik1 F1 skip', () => evaluate("window.__videoDebug.controller.result?.result==='skipped' && window.__sccDebug.view()?.state.objects.get('Slip')?.state===1"));
 }
 async function waitForGoto5Visible() {
   await waitForPanel('Goto_5.visible=true');
   await waitForPanel('init=[1:1]');
-  await sleep(500);
 }
 
 try {
@@ -145,7 +153,7 @@ try {
     return text.includes('SCENE DEBUG · active=1') && text.includes('Goto_5.visible=true') ? text : false;
   }, 30000);
   await waitForPanel('init=[1:1]');
-  await sleep(500);
+  await skipStartupVideo();
   let text = await panel();
   assert(text.includes('zone=3'), `Level1 Init Setzon 3, got:\n${text}`);
   assert(text.includes('level1.Botl.state=0'), `fresh bottle state, got:\n${text}`);

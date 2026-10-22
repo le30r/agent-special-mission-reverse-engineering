@@ -1,4 +1,5 @@
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /** UI-only save/reload/load plus downloaded JSON import with a real canvas pickup. */
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -25,7 +26,7 @@ async function fkey(key){await send('Input.dispatchKeyEvent',{type:'rawKeyDown',
 try {
   const downloadDir=resources.tempDir('downloads');
   await send('Browser.setDownloadBehavior',{behavior:'allow',downloadPath:downloadDir});
-  await send('Page.enable');await send('Runtime.enable');await send('Page.navigate',{url});
+  await send('Page.enable');await send('Runtime.enable');await send('Page.navigate',{url});await skipStartupVideo(send,evaluate);
   await waitFor('active Level1',async()=>await evaluate('Boolean(window.__saveLoadDebug&&window.__sccDebug?.view())'));
   await waitFor('eligible save point',async()=>await evaluate('window.__saveLoadDebug.canSave().ok'));
   const rect=await evaluate(`(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return{left:r.left,top:r.top,width:r.width,height:r.height}})()`);
@@ -45,6 +46,7 @@ try {
   const stored=await evaluate("localStorage.getItem('agent-revers.save.v1.slot.0')");
   assert(stored&&JSON.parse(stored).integrity.algorithm==='sha256-utf8','slot stores SaveCodec envelope');
   await send('Page.reload',{ignoreCache:true});
+  await skipStartupVideo(send,evaluate);
   await waitFor('new page runtime',async()=>await evaluate('Boolean(window.__saveLoadDebug&&window.__sccDebug?.view())'));
   await waitFor('reloaded Level1 ready',async()=>await evaluate('window.__saveLoadDebug?.canSave().ok'));
   await fkey('F3');await waitFor('Load UI after reload',async()=>await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"));
@@ -67,6 +69,7 @@ try {
   const exportPath=path.join(downloadDir,filename); await writeFile(exportPath,exported,'utf8');
   await evaluate("(()=>{for(let i=0;i<6;i++)localStorage.removeItem(`agent-revers.save.v1.slot.${i}`)})()");
   await send('Page.reload',{ignoreCache:true});
+  await skipStartupVideo(send,evaluate);
   await waitFor('fresh runtime after clearing slots',async()=>await evaluate('Boolean(window.__saveLoadDebug?.canSave().ok)'));
   assert(await evaluate("Array.from({length:6},(_,i)=>localStorage.getItem(`agent-revers.save.v1.slot.${i}`)).every(x=>x===null)"),'test profile slots are empty before file import');
   await send('Page.bringToFront');

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /** Real-browser Level21 ladder rendering, pickup, and scene re-entry regression. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -117,6 +118,7 @@ try {
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Page.navigate', { url: startUrl });
+  await skipStartupVideo(send,evaluate);
   await waitFor('initial Level1', async () => (await panel()).includes('active=1'));
 
   // Enter a neighboring scene through its normal scene loader, then use the real
@@ -232,6 +234,7 @@ try {
   assert(savedPayload?.integrity?.algorithm==='sha256-utf8','Level21 UI writes a SaveCodec envelope');
   assert(JSON.parse(savedPayload.payload).world.activeLevel===21,'saved slot payload is Level21');
   await send('Page.reload',{ignoreCache:true});
+  await skipStartupVideo(send,evaluate);
   await waitFor('fresh page boot before Level21 restore', async () => await evaluate("Boolean(window.__saveLoadDebug&&window.__sccDebug?.view()?.definition.id===1)"));
   await pressKey('F3','F3',114);
   await waitFor('Level21 Load UI after reload', async () => await evaluate("Boolean(document.querySelector('.save-load-overlay')&&!document.querySelector('.save-load-overlay').hidden)"));

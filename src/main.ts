@@ -14,6 +14,7 @@ import { SaveLoadView } from './scene/save-load-view';
 import { SaveCodec } from './scene/save-codec';
 import { pixiTextureDiagnostics } from './scene/textures';
 import { MapController } from './scene/map-controller';
+import { VideoPlaybackController } from './video/video-playback-controller';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -141,6 +142,7 @@ async function main() {
   // only when a scene is entered. Nothing from the scene corpus is uploaded up front.
   const catalog = await loadSceneCatalog();
   const provider = new SceneAssetProvider(catalog.manifest);
+  const videoController = new VideoPlaybackController(host);
   let audioBackend: BrowserAudioBackend | undefined;
   if (parameters.get('audio') !== 'silent' && typeof AudioContext !== 'undefined') {
     try { audioBackend = new BrowserAudioBackend(); } catch (error) { console.warn('Web Audio unavailable; using deterministic silent timing backend', error); }
@@ -149,6 +151,7 @@ async function main() {
   overlay.addChild(inventoryView.root);
   const session = new SceneSession(stageRoot, provider, {
     audioBackend,
+    videoController,
     saveUiBusy: () => inventoryView.open || inventoryView.pendingSelection !== 0,
     onRestoreCommit: (items) => { inventoryView.resetForRestore(); inventoryView.setItems(items); },
     onUnsupported: (scene) => { unsupported.push(scene); console.warn(`Scene ${scene} is not in the original scene manifest`); },
@@ -173,7 +176,7 @@ async function main() {
     map: () => session.loader.game.map,
     canOpen: () => {
       const view = session.view;
-      return !!view && !view.scc.busy && !view.blocked && !view.hasScenarioBarrier && !session.loading && !session.loader.pending &&
+      return !!view && !session.videoBarrierActive && !view.scc.busy && !view.blocked && !view.hasScenarioBarrier && !session.loading && !session.loader.pending &&
         !session.isRestoring && !inventoryView.open && inventoryView.pendingSelection === 0 && !saveLoadView.isOpen;
     },
     request: (scene, portal) => session.request(scene, portal, 'map'),
@@ -193,10 +196,17 @@ async function main() {
     : undefined;
   if (debugPanel) host.appendChild(debugPanel.root);
   if (sceneDebug || hitboxDebug) {
-    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown; __hitboxDebug?: unknown };
+    const debugWindow = window as Window & { __audioDebug?: unknown; __sccDebug?: unknown; __inventoryDebug?: unknown; __hitboxDebug?: unknown; __videoDebug?: unknown };
     debugWindow.__audioDebug = { backend: audioBackend, view: () => session.view };
     debugWindow.__sccDebug = { session, view: () => session.view };
     debugWindow.__inventoryDebug = { view: () => ({ open: inventoryView.open, pendingSelection: inventoryView.pendingSelection }) };
+    debugWindow.__videoDebug = {
+      controller: videoController,
+      view: () => session.view,
+      session,
+      get gameTime() { return elapsedNow; },
+      get tickNumber() { return tickNumber; },
+    };
     if (hitboxDebugApi) debugWindow.__hitboxDebug = hitboxDebugApi;
   }
   if (saveDebug) {
@@ -250,8 +260,8 @@ async function main() {
       mapController.tick(dt);
       return;
     }
-    tickNumber++;
-    elapsedNow += dt;
+    const videoWasActive = session.videoActive;
+    if (!videoWasActive) { tickNumber++; elapsedNow += dt; }
     // A scene switch (including its lazy resource load) is applied only at this boundary.
     session.flush();
     const view = session.view;
@@ -267,7 +277,7 @@ async function main() {
     inventoryView.setItems(session.loader.inventory);
     debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
-    if (view) session.markPostTick();
+    if (view && !session.videoActive) session.markPostTick();
     if (depthPanel) depthPanel.textContent = view?.depthReport() ?? 'DEPTH DEBUG · no active scene';
     if (animationPanel) {
       animationPanel.textContent = view
@@ -320,6 +330,11 @@ async function main() {
     if (hitboxPanel) hitboxPanel.dataset.pointer = `${x},${y}`;
   });
   app.canvas.addEventListener('pointerdown', (event) => {
+    if (session.videoBarrierActive) {
+      if (event.button === 0) videoController.skip();
+      event.preventDefault();
+      return;
+    }
     if (mapController.isOpen) {
       event.preventDefault();
       mapController.pointerDown(event.button);
@@ -345,9 +360,24 @@ async function main() {
     const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
     app.canvas.style.width = `${VIEWPORT_WIDTH * scale}px`;
     app.canvas.style.height = `${VIEWPORT_HEIGHT * scale}px`;
+    videoController.position(app.canvas.getBoundingClientRect());
   });
-  window.addEventListener('pagehide', () => mapController.dispose(), { once: true });
+  window.addEventListener('pagehide', () => { mapController.dispose(); videoController.dispose(); }, { once: true });
+  host.addEventListener('pointerdown', (event) => {
+    if (!session.videoBarrierActive || event.button !== 0) return;
+    const target = event.target;
+    if (target instanceof Element && target.closest('.original-video-play')) return;
+    videoController.skip();
+    event.preventDefault();
+    event.stopPropagation();
+  }, { capture: true });
   window.addEventListener('keydown', (event) => {
+    if (session.videoBarrierActive) {
+      videoController.skip();
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      return;
+    }
     if (mapController.isOpen && (event.key === 'F1' || event.key === 'Escape')) {
       event.preventDefault();
       if (event.key === 'F1') mapController.toggle(); else mapController.escape();

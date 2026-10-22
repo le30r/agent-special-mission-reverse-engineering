@@ -53,6 +53,9 @@ export type SccHost = {
   /** Optional long-lived state store. Without them the interpreter keeps its own map. */
   readState?(name: string, scene?: number): number;
   writeState?(name: string, value: number): void;
+  beginVideo?(file: string, ignoredSccArg: number): void;
+  /** Session-global multimedia clip barrier, shared by all Programs/scene visits. */
+  videoActive?(): boolean;
 };
 type ProgramState = { program: SccProgram; active: boolean; waiting: boolean; pc: number; waitName?: string; suppressSetxy?: boolean };
 
@@ -233,6 +236,11 @@ export class SccRuntime {
     this.inventory = inventory;
   }
 
+  videoActive(): boolean { return this.host.videoActive?.() ?? false; }
+  get videoPending(): boolean {
+    return this.programs.some((program) => program.active && program.waiting && program.program.commands[program.pc]?.op === 'SclipW');
+  }
+
   /** A pointer/object interaction cancels every currently active Program. */
   click(event: string, selectedItem = 0): boolean {
     this.cancelActive();
@@ -354,11 +362,13 @@ export class SccRuntime {
         continue;
       }
       if (command.op === 'Setmap') { this.host.setMap?.(command.value); state.pc++; continue; }
-      // Temporary faithful-enough video contract: suspend for exactly one poll so Init
-      // cannot finish synchronously, then continue automatically. The loader's Start
-      // dispatch happens before the next tick resumes this Program.
       if (command.op === 'SclipW') {
-        if (!state.waiting) { state.waiting = true; return; }
+        if (!state.waiting) {
+          state.waiting = true;
+          this.host.beginVideo?.(command.file, command.value);
+          return;
+        }
+        if (this.host.videoActive?.()) return;
         state.waiting = false; state.pc++; continue;
       }
       // Audio is intentionally not reproduced by the browser prototype.

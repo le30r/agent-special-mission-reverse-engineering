@@ -8,6 +8,7 @@ import { SaveCodec, type GameSaveV1, type Result, type SaveEligibility } from '.
 import { saveContentHash } from './save-codec';
 import { parseObjectCreationIdentities } from '../scc/runtime';
 import { pixiTextureDiagnostics, resetPixiTextureDiagnostics } from './textures';
+import type { VideoPlaybackController } from '../video/video-playback-controller';
 
 /** Resources prepared for one scene visit; released when the scene is left. */
 export type LoadedScene = { definition: SceneDefinition; background: Texture };
@@ -30,6 +31,7 @@ export type SceneProvider = {
 
 export type SceneSessionOptions = {
   audioBackend?: BrowserAudioBackend;
+  videoController?: VideoPlaybackController;
   /** Called when the SCC names a scene that is not in the prepared manifest. */
   onUnsupported?: (scene: number) => void;
   /** Called when a known scene fails to load; the current scene stays active. */
@@ -161,6 +163,8 @@ export class SceneSession {
 
   get supportedScenes(): number[] { return [...this.provider.ids].sort((a, b) => a - b); }
   get isRestoring(): boolean { return this.restoring; }
+  get videoActive(): boolean { return this.options.videoController?.active ?? false; }
+  get videoBarrierActive(): boolean { return this.videoActive || Boolean(this.view?.scc.videoPending); }
   /** Pure, detached snapshot of canonical scene state plus the active live pose. */
   capturePersistentState(): PersistentWorldSnapshot {
     const live = this.view?.capturePersistentState();
@@ -171,6 +175,7 @@ export class SceneSession {
     );
   }
   canSave(): SaveEligibility {
+    if (this.videoBarrierActive) return { ok:false, code:'Busy', reason:'video playback barrier is active' };
     if (this.restoring) return { ok:false, code:'Busy', reason:'session restore is in progress' };
     if (!this.view || !this.loaded || this.view.definition.id !== this.loaded.id || this.loader.active?.id !== this.view.definition.id) return { ok:false, code:'Busy', reason:'no fully active scene' };
     if (this.loader.pending || this.pendingLoad) return { ok:false, code:'TransitionInProgress', reason:'a scene transition or resource load is pending' };
@@ -199,6 +204,8 @@ export class SceneSession {
 
   /** Prepare a detached candidate; only after it is render-ready do we invalidate and swap visits. */
   async importSave(save: GameSaveV1): Promise<Result<void>> {
+    this.view?.scc.cancelActive();
+    this.options.videoController?.cancel();
     const startedAt = performance.now();
     const phases: Record<string, number> = {};
     resetPixiTextureDiagnostics();
@@ -285,6 +292,8 @@ export class SceneSession {
         lstate:(scene,name,value)=>candidateLoader.lstate(scene,name,value),
         setZone:zone=>candidateLoader.unlockMapZone(zone), setMap:bank=>candidateLoader.setMapBank(bank),
         readState:(scene,name)=>candidateLoader.readState(scene,name),
+        beginVideo:(file,ignoredSccArg)=>this.options.videoController?.begin({originalName:file,ignoredSccArg}),
+        videoActive:()=>this.videoActive,
       };
       candidateView=this.options.createView?.(candidateScene.definition,state,candidateScene.background,hooks,candidateLoader.inventory)
         ?? new SceneView(candidateScene.definition,state,candidateScene.background,hooks,candidateLoader.inventory,this.options.audioBackend);
@@ -379,6 +388,7 @@ export class SceneSession {
       }
       return false;
     }
+    if (this.view && this.view.definition.id !== id) this.options.videoController?.cancel();
     this.startLoad(id);
     return false;
   }
@@ -432,6 +442,8 @@ export class SceneSession {
       setZone: (zone) => this.loader.unlockMapZone(zone),
       setMap: (bank) => this.loader.setMapBank(bank),
       readState: (targetScene, name) => this.loader.readState(targetScene, name),
+      beginVideo: (file, ignoredSccArg) => this.options.videoController?.begin({ originalName: file, ignoredSccArg }),
+      videoActive: () => this.videoActive,
     };
     const switched = this.loader.enterPending(
       (state: SceneState, runtime) => {

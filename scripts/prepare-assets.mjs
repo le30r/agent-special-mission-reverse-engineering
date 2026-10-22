@@ -20,8 +20,16 @@ import { spawnSync } from 'node:child_process';
 import { discoverSceneDependencies, normalizeOriginalPath } from '../src/scene/scene-discovery.ts';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const source = path.join(root, 'agent-original/game-resources');
-const scripts = path.join(root, 'agent-original/game-installed/Program_Executable_Files/Scripts');
+function findRepositoryRoot(from) {
+  for (let current = from; ; current = path.dirname(current)) {
+    if (existsSync(path.join(current, '.git', 'HEAD')) || existsSync(path.join(current, '.git', 'refs'))) return current;
+    const parent = path.dirname(current);
+    if (parent === current) throw new Error(`Cannot locate repository root above ${from}`);
+  }
+}
+const repositoryRoot = findRepositoryRoot(root);
+const source = path.join(repositoryRoot, 'agent-original/game-resources');
+const scripts = path.join(repositoryRoot, 'agent-original/game-installed/Program_Executable_Files/Scripts');
 const output = path.join(root, 'public/resources');
 const generated = path.join(root, 'public/generated');
 const backgroundsOutput = path.join(generated, 'backgrd');
@@ -73,6 +81,11 @@ const diagnostics = [...discovery.diagnostics];
 
 const copied = { scc: 0, mult: 0, mask: 0, background: 0, shared: 0, wav: 0, wavPcm: 0 };
 const converted = { background: 0, external: 0, skipped: 0, failed: 0 };
+
+const videoPreparation = spawnSync(process.execPath, [path.join(root, 'scripts/prepare-video.mjs')], { encoding: 'utf8' });
+if (videoPreparation.stdout) process.stdout.write(videoPreparation.stdout);
+if (videoPreparation.stderr) process.stderr.write(videoPreparation.stderr);
+if (videoPreparation.status !== 0) throw new Error(`Original video preparation failed: ${videoPreparation.error?.message ?? `exit ${videoPreparation.status}`}`);
 
 /** Copy every scene SCC and every recursively included SCC at the resources root. */
 const sccFiles = new Set();

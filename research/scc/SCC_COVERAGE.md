@@ -191,7 +191,7 @@ Total 3267 command occurrences. Column "crit." = progression criticality.
 | **`Block`** | 23 | 13 | ❌ **not implemented** | **critical** |
 | `Setzon` | 15 | 14 | ✅ full (game-session int) | low |
 | **`Setbck`** | 6 | 3 | ❌ not implemented | med |
-| `SclipW` | 5 | 4 | 🟡 stub (one-poll yield) | low |
+| `SclipW` | 5 | 4 | ✅ original AVI playback + global session barrier | high |
 | **`Shift`** | 5 | 3 | ❌ not implemented (semantics UNKNOWN) | med |
 | **`StatrW`** | 5 | 3 | ❌ dropped; see §2.5 (hash collision) | med |
 | **`Setbcr`** | 2 | 1 | ❌ not implemented | med |

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /** Original-resource Fault integration: Level1 Morda plus both Level29 Janitor voices. */
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -44,6 +45,7 @@ try {
     };
   })();` });
   await send('Page.enable'); await send('Runtime.enable'); await send('Page.navigate', { url });
+  await skipStartupVideo(send,evaluate);
   await waitFor('Level1 Init', async () => { const p = await panel(); return p.includes('active=1') ? p : false; });
   await waitFor('Morda visible', () => evaluate("window.__sccDebug.view().activeVisible('Morda')"));
   await evaluate('window.__sccDebug.view().setFaultRand15(() => 0)');
