@@ -1,3 +1,5 @@
+Basic Memory project: agent-reverse
+
 ## Git Worktrees
 
 - Create all Git worktrees under `<repository>/.worktrees/`.
