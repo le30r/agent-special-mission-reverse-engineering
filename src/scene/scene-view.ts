@@ -820,6 +820,18 @@ export class SceneView {
   }
 
   /** Left-click target selection; right-click remains on its existing path. */
+  cursorIdAt(screenX: number, screenY: number): number {
+    if (this.selectedItem !== 0) return 0;
+    const target = pickSceneTarget(this.sceneHitCandidates(), this.hitPoint(screenX, screenY));
+    if (!target) return 0;
+    const stored = findNamedObject(this.state.objects.values(), target.name);
+    const declared = target.kind === 'Active'
+      ? findNamedObject(this.definition.active.values(), target.name)
+      : findNamedObject(this.definition.objects.values(), target.name);
+    const id = stored?.cursorId ?? declared?.cursorId ?? 0;
+    return Number.isInteger(id) && id >= 0 && id <= 7 ? id : 0;
+  }
+
   pointerDown(screenX: number, screenY: number): void {
     if (this.scc.busy) {
       if (this.hitboxDebugEnabled) {

@@ -15,6 +15,7 @@ import { SaveCodec } from './scene/save-codec';
 import { pixiTextureDiagnostics } from './scene/textures';
 import { MapController } from './scene/map-controller';
 import { VideoPlaybackController } from './video/video-playback-controller';
+import { CursorView } from './scene/cursor-view';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -172,6 +173,9 @@ async function main() {
   host.appendChild(saveLoadButton);
   const mapLayer = new Container();
   overlay.addChild(mapLayer);
+  const cursorView = new CursorView();
+  overlay.addChild(cursorView.root);
+  void cursorView.load(catalog.resources);
   const mapController = new MapController(mapLayer, {
     map: () => session.loader.game.map,
     canOpen: () => {
@@ -250,6 +254,8 @@ async function main() {
   let elapsedNow = 0;
   let mapCursorHidden = false;
   const canvasCursor = app.canvas.style.cursor;
+  let pointerX = 0;
+  let pointerY = 0;
   app.ticker.add((ticker) => {
     if (mapCursorHidden !== mapController.isOpen) {
       mapCursorHidden = mapController.isOpen;
@@ -257,6 +263,7 @@ async function main() {
     }
     const dt = Math.max(0, ticker.deltaMS);
     if (mapController.isOpen) {
+      cursorView.update(undefined, pointerX, pointerY, dt, false);
       mapController.tick(dt);
       return;
     }
@@ -277,6 +284,9 @@ async function main() {
     inventoryView.setItems(session.loader.inventory);
     debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
+    cursorView.update(view, pointerX, pointerY, dt,
+      !inventoryView.open && !saveLoadView.isOpen && !session.videoBarrierActive && !session.isRestoring);
+    app.canvas.style.cursor = cursorView.root.visible ? 'none' : canvasCursor;
     if (view && !session.videoActive) session.markPostTick();
     if (depthPanel) depthPanel.textContent = view?.depthReport() ?? 'DEPTH DEBUG · no active scene';
     if (animationPanel) {
@@ -326,9 +336,12 @@ async function main() {
 
   app.canvas.addEventListener('pointermove', (event) => {
     const [x, y] = screenPosition(app, event);
+    pointerX = x; pointerY = y;
+    cursorView.setPointerInside(true);
     mapController.pointerMove(x, y);
     if (hitboxPanel) hitboxPanel.dataset.pointer = `${x},${y}`;
   });
+  app.canvas.addEventListener('pointerleave', () => cursorView.setPointerInside(false));
   app.canvas.addEventListener('pointerdown', (event) => {
     if (session.videoBarrierActive) {
       if (event.button === 0) videoController.skip();
@@ -362,7 +375,7 @@ async function main() {
     app.canvas.style.height = `${VIEWPORT_HEIGHT * scale}px`;
     videoController.position(app.canvas.getBoundingClientRect());
   });
-  window.addEventListener('pagehide', () => { mapController.dispose(); videoController.dispose(); }, { once: true });
+  window.addEventListener('pagehide', () => { cursorView.dispose(); mapController.dispose(); videoController.dispose(); }, { once: true });
   host.addEventListener('pointerdown', (event) => {
     if (!session.videoBarrierActive || event.button !== 0) return;
     const target = event.target;
