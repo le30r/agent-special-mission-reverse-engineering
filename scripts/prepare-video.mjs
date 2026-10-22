@@ -3,23 +3,9 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const names = ['Title.avi', 'Titres.avi', 'Rolik1.avi', 'Rolik2.avi', 'Rolik5.avi', 'Final.avi'];
-
-// Assets are deliberately outside Git. In a worktree, use the shared checkout's
-// immutable originals; in a regular checkout the local path is used directly.
-function findRepositoryRoot(from) {
-  for (let current = from; ; current = path.dirname(current)) {
-    if (existsSync(path.join(current, '.git', 'HEAD')) || existsSync(path.join(current, '.git', 'refs'))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) throw new Error(`Cannot locate repository root above ${from}`);
-  }
-}
-const repositoryRoot = findRepositoryRoot(root);
-const sourceDir = path.join(repositoryRoot, 'agent-original', 'extracted', 'Data');
+import { root, videoSource as sourceDir, videoNames as names } from './lib/asset-paths.mjs';
 const outputDir = path.join(root, 'public', 'generated', 'video');
 const manifestPath = path.join(outputDir, 'manifest.json');
 const manifest = { version: 1, format: 'mp4', codec: 'H.264 yuv420p + AAC', clips: {}, diagnostics: [] };

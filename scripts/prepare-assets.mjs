@@ -15,21 +15,14 @@ import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { tiffImageInput } from './lib/tiff.mjs';
 import { discoverSceneDependencies, normalizeOriginalPath } from '../src/scene/scene-discovery.ts';
 
-const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-function findRepositoryRoot(from) {
-  for (let current = from; ; current = path.dirname(current)) {
-    if (existsSync(path.join(current, '.git', 'HEAD')) || existsSync(path.join(current, '.git', 'refs'))) return current;
-    const parent = path.dirname(current);
-    if (parent === current) throw new Error(`Cannot locate repository root above ${from}`);
-  }
-}
-const repositoryRoot = findRepositoryRoot(root);
-const source = path.join(repositoryRoot, 'agent-original/game-resources');
-const scripts = path.join(repositoryRoot, 'agent-original/game-installed/Program_Executable_Files/Scripts');
+import { root, source, scripts } from './lib/asset-paths.mjs';
+import { checkAssets } from './check-assets.mjs';
+
+await checkAssets();
 const output = path.join(root, 'public/resources');
 const generated = path.join(root, 'public/generated');
 const backgroundsOutput = path.join(generated, 'backgrd');
@@ -71,8 +64,15 @@ async function convertTiff(from, to) {
   if (!fromStat?.isFile()) return { ok: false, reason: `source is not a file: ${from}` };
   if (toStat?.isFile() && toStat.size > 0 && toStat.mtimeMs >= fromStat.mtimeMs) return { ok: true, skipped: true };
   await mkdir(path.dirname(to), { recursive: true });
-  const result = spawnSync('sips', ['-s', 'format', 'png', from, '--out', to], { encoding: 'utf8' });
-  if (result.status !== 0) return { ok: false, reason: result.stderr || result.stdout || `sips exited ${result.status}` };
+  try {
+    const bytes = await readFile(from);
+    const input = tiffImageInput(bytes);
+    // FFmpeg's TIFF decoder needs a seekable file; only unwrapped JPEG uses stdin.
+    const unwrapped = input !== bytes;
+    const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y',
+      '-i', unwrapped ? 'pipe:0' : from, '-frames:v', '1', to], { input: unwrapped ? input : undefined, encoding: 'utf8' });
+    if (result.status !== 0) return { ok: false, reason: result.error?.message || result.stderr || `ffmpeg exited ${result.status}` };
+  } catch (error) { return { ok: false, reason: error.message }; }
   return { ok: true };
 }
 
@@ -146,7 +146,7 @@ for (const file of await walk(source)) {
     await mkdir(path.dirname(pcmTarget), { recursive: true });
     const result = spawnSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-nostdin', '-y', '-i', file, '-map_metadata', '0', '-c:a', 'pcm_s16le', pcmTarget], { encoding: 'utf8' });
     if (result.status === 0) copied.wavPcm++;
-    else diagnostics.push({ level: 'warning', kind: 'wav-convert', path: rel, message: result.error?.message ?? result.stderr?.trim() ?? `ffmpeg exited ${result.status}` });
+    else diagnostics.push({ level: 'error', kind: 'wav-convert', path: rel, message: result.error?.message ?? result.stderr?.trim() ?? `ffmpeg exited ${result.status}` });
   }
   // Preserve complete RSS-style resource names; ambiguous duplicate keys are not silently overwritten.
   if (audioResources[key] && audioResources[key] !== `/resources/${rel}`) {
@@ -340,4 +340,8 @@ console.log(`Loadable scenes: ${loadable.length}/${scenes.length}${incomplete.le
 if (diagnostics.length) {
   console.warn(`Diagnostics: ${diagnostics.length}`);
   for (const diagnostic of diagnostics.slice(0, 30)) console.warn(`  [${diagnostic.level}] ${diagnostic.scene ? `Level${diagnostic.scene}: ` : ''}${diagnostic.message}`);
+}
+
+if (incomplete.length || diagnostics.some((entry) => entry.level === 'error')) {
+  throw new Error('Asset preparation is incomplete; see public/generated/scenes.json diagnostics.');
 }

@@ -3,7 +3,7 @@
 # Original game (copyrighted content)
 # ============================================
 
-/agent-original/
+/agent-original
 
 # Game archives and binaries, regardless of location
 *.exe
@@ -136,3 +136,46 @@ venv/
 *.tmp
 *.swp
 /research/mult/rea_client.mjs
+
+# Disc images, installers and original/converted media (case-insensitive suffixes)
+*.[eE][xX][eE]
+*.[dD][lL][lL]
+*.[cC][aA][bB]
+*.[hH][dD][rR]
+*.[iI][sS][oO]
+*.[mM][dD][fF]
+*.[mM][dD][sS]
+*.[bB][iI][nN]
+*.[cC][uU][eE]
+*.[nN][rR][gG]
+*.[rR][sS][sS]
+*.[sS][cC][cC]
+*.[mM][uU][lL][tT]
+*.[tT][iI][fF]
+*.[tT][iI][fF][fF]
+*.[wW][aA][vV]
+*.[aA][vV][iI]
+*.[mM][pP]4
+*.[mM][pP]3
+*.[zZ][iI][pP]
+*.[rR][aA][rR]
+*.7[zZ]
+# Game-derived images; explicitly opt in authored documentation/fixtures below.
+*.[pP][nN][gG]
+!docs/images/authored/**
+!tests/fixtures/authored/**
+# Disposable outputs; never hide scripts, Markdown research or authored fixtures.
+/artifacts/
+/test-results/
+/playwright-report/
+/e2e-output/
+/e2e-artifacts/
+/test-artifacts/
+/chromium-profiles/
+/downloads/
+/tmp/
+*.rgba
+*.pcm
+/research/**/evidence/**/*.json
+/research/**/*dump*.json
+!tests/fixtures/authored/**
