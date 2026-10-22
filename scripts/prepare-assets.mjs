@@ -200,6 +200,14 @@ for (const scene of discovery.scenes) {
   }
 }
 
+/** Original map mode is a UI resource, not a scene dependency. */
+const mapTiff = 'block0/TZU/Interface/Map/Map.TIF';
+if (await copyIfChanged(path.join(source, mapTiff), path.join(output, mapTiff))) copied.shared++;
+const mapBackground = await convertTiff(path.join(source, mapTiff), path.join(generated, 'interface/map.png'));
+if (!mapBackground.ok) diagnostics.push({ level: 'error', kind: 'interface-map-convert', path: mapTiff, message: String(mapBackground.reason) });
+else if (mapBackground.skipped) converted.skipped++;
+else converted.background++;
+
 /** Case-insensitive lookup used by tests/diagnostics and by original SCC paths. */
 const resourceIndex = {};
 for (const file of await walk(output)) {

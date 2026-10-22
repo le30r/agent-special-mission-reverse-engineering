@@ -13,6 +13,7 @@ import { SaveRepository } from './scene/save-repository';
 import { SaveLoadView } from './scene/save-load-view';
 import { SaveCodec } from './scene/save-codec';
 import { pixiTextureDiagnostics } from './scene/textures';
+import { MapController } from './scene/map-controller';
 
 function screenPosition(app: Application, event: PointerEvent): Point {
   const rect = app.canvas.getBoundingClientRect();
@@ -164,7 +165,23 @@ async function main() {
   host.appendChild(saveLoadView.root);
   const saveLoadButton = document.createElement('button');
   saveLoadButton.type = 'button'; saveLoadButton.className = 'save-load-launch'; saveLoadButton.textContent = 'Сохранить / загрузить · F2 / F3';
-  saveLoadButton.onclick = () => void saveLoadView.open('save'); host.appendChild(saveLoadButton);
+  saveLoadButton.onclick = () => { if (!mapController.isOpen) void saveLoadView.open('save'); };
+  host.appendChild(saveLoadButton);
+  const mapLayer = new Container();
+  overlay.addChild(mapLayer);
+  const mapController = new MapController(mapLayer, {
+    map: () => session.loader.game.map,
+    canOpen: () => {
+      const view = session.view;
+      return !!view && !view.scc.busy && !view.blocked && !view.hasScenarioBarrier && !session.loading && !session.loader.pending &&
+        !session.isRestoring && !inventoryView.open && inventoryView.pendingSelection === 0 && !saveLoadView.isOpen;
+    },
+    request: (scene, portal) => session.request(scene, portal, 'map'),
+    reportError: (message) => {
+      console.error(`Original game map failed to open: ${message}`);
+      hud.textContent = `Карта недоступна: ${message}`;
+    },
+  });
   const debugPanel = sceneDebug || hitboxDebug ? new DebugPanel(catalog.manifest, session, inventoryView, hitboxDebug) : undefined;
   if (hitboxDebug) host.dataset.hitboxDebug = 'true';
   const hitboxPanel = hitboxDebug ? document.createElement('pre') : undefined;
@@ -202,14 +219,38 @@ async function main() {
   session.flush();
   if ((sceneDebug || hitboxDebug) && session.view) session.view.root.addChild(hitboxGraphics);
   if (session.view) session.view.hitboxDebugEnabled = hitboxDebug;
+  if (sceneDebug || hitboxDebug || saveDebug) {
+    (window as Window & { __mapDebug?: unknown }).__mapDebug = {
+      view: () => ({
+        phase: mapController.phase,
+        selected: mapController.selected,
+        canOpen: mapController.canOpenNow,
+        error: mapController.lastError,
+        bank: session.loader.game.map.model === 'banked-v1' ? session.loader.game.map.bank : 0,
+        unlocked: session.loader.game.map.model === 'banked-v1'
+          ? session.loader.game.map.unlocked.map((row) => [...row])
+          : [Array(7).fill(false), Array(7).fill(false)],
+      }),
+    };
+  }
 
   if (depthDebug) host.appendChild(buildSceneControls(catalog.manifest, session));
 
   let tickNumber = 0;
   let elapsedNow = 0;
+  let mapCursorHidden = false;
+  const canvasCursor = app.canvas.style.cursor;
   app.ticker.add((ticker) => {
-    tickNumber++;
+    if (mapCursorHidden !== mapController.isOpen) {
+      mapCursorHidden = mapController.isOpen;
+      app.canvas.style.cursor = mapCursorHidden ? 'none' : canvasCursor;
+    }
     const dt = Math.max(0, ticker.deltaMS);
+    if (mapController.isOpen) {
+      mapController.tick(dt);
+      return;
+    }
+    tickNumber++;
     elapsedNow += dt;
     // A scene switch (including its lazy resource load) is applied only at this boundary.
     session.flush();
@@ -273,7 +314,17 @@ async function main() {
       : `Агент: Особое задание · сцена ${view?.definition.id ?? '—'} · zone ${session.loader.game.zone} · инвентарь ${view && view.scc.inventory.length ? view.scc.inventory.join(', ') : 'пусто'}${selected ? ` · выбран предмет ${selected}` : ''} · Botl.state=${botl}`;
   });
 
+  app.canvas.addEventListener('pointermove', (event) => {
+    const [x, y] = screenPosition(app, event);
+    mapController.pointerMove(x, y);
+    if (hitboxPanel) hitboxPanel.dataset.pointer = `${x},${y}`;
+  });
   app.canvas.addEventListener('pointerdown', (event) => {
+    if (mapController.isOpen) {
+      event.preventDefault();
+      mapController.pointerDown(event.button);
+      return;
+    }
     // Unlock Web Audio from the user's gesture before SCC click handling.
     if (audioBackend) void audioBackend.resume().catch((error) => console.warn('Audio unlock failed', error));
     const view = session.view;
@@ -290,22 +341,30 @@ async function main() {
     }
     view.pointerDown(x, y);
   });
-  if (hitboxPanel) app.canvas.addEventListener('pointermove', (event) => {
-    const [x, y] = screenPosition(app, event); hitboxPanel.dataset.pointer = `${x},${y}`;
-  });
-
   window.addEventListener('resize', () => {
     const scale = Math.min(window.innerWidth / VIEWPORT_WIDTH, window.innerHeight / VIEWPORT_HEIGHT);
     app.canvas.style.width = `${VIEWPORT_WIDTH * scale}px`;
     app.canvas.style.height = `${VIEWPORT_HEIGHT * scale}px`;
   });
+  window.addEventListener('pagehide', () => mapController.dispose(), { once: true });
   window.addEventListener('keydown', (event) => {
+    if (mapController.isOpen && (event.key === 'F1' || event.key === 'Escape')) {
+      event.preventDefault();
+      if (event.key === 'F1') mapController.toggle(); else mapController.escape();
+      return;
+    }
     if (event.key === 'Escape' && saveLoadView.isOpen) {
       event.preventDefault(); saveLoadView.close(); return;
     }
     const target = event.target;
     const typing = target instanceof HTMLElement && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName));
     if (typing) return;
+    if (event.key === 'F1') {
+      event.preventDefault(); mapController.toggle(); return;
+    }
+    if (mapController.isOpen && (event.key === 'F2' || event.key === 'F3')) {
+      event.preventDefault(); return;
+    }
     if (event.key === 'F2') {
       event.preventDefault(); void saveLoadView.open('save'); return;
     }
