@@ -224,8 +224,9 @@ export class SceneView {
     this.hero.visible = mode !== 'hidden';
     this.scrollX = updateScroll(0, this.heroPosition[0], this.mask.width, VIEWPORT_WIDTH);
     this.root.x = -this.scrollX;
-    this.heroDepth = depthAt(this.mask, Math.round(this.heroPosition[0]), Math.round(this.heroPosition[1]), this.focus);
-    this.hero.zIndex = pixiDepthIndex(this.heroDepth);
+    const stored = findNamedObject(this.state.objects.values(), 'Mainhero');
+    if (mode !== 'navigation' && stored) this.setObjectDepth(stored.name, stored.depth, stored.depthProvenance);
+    else this.updateHeroNavigationDepth();
   }
 
   /** Returns detached persistent fields without touching schedulers, route, sound or the live scene. */
@@ -372,6 +373,7 @@ export class SceneView {
     this.hero.x = this.heroPosition[0];
     this.hero.y = this.heroPosition[1];
     this.hero.scale.set(entry.scale);
+    this.updateHeroNavigationDepth();
   }
 
   /** Applies the entry pose (Stop<direction>) and re-applies the logical hero placement. */
@@ -387,6 +389,14 @@ export class SceneView {
 
   private scaleHere(): number {
     return Math.max(0.01, scaleAt(this.mask, Math.round(this.heroPosition[0]), Math.round(this.heroPosition[1]), this.focus));
+  }
+
+  /** Native placement (entry/Setxy/walking) writes depth; idle animation ticks do not. */
+  private updateHeroNavigationDepth(): void {
+    this.heroDepth = depthAt(this.mask, Math.round(this.heroPosition[0]), Math.round(this.heroPosition[1]), this.focus);
+    this.hero.zIndex = pixiDepthIndex(this.heroDepth);
+    const stored = findNamedObject(this.state.objects.values(), 'Mainhero');
+    if (stored) setStateDepth(this.state, stored.name, this.heroDepth, { kind: 'default', detail: 'mask(x,y)+Focus' });
   }
 
   private setLogicalPosition(x: number, y: number): void {
@@ -406,6 +416,7 @@ export class SceneView {
     this.hero.anchor.set(0.5, 1);
     this.hero.x = px; this.hero.y = py;
     this.hero.scale.set(this.scaleHere());
+    this.updateHeroNavigationDepth();
     this.traceVisual('Mainhero', this.hero, name, this.player.state(name)?.frame ?? 1, 'SCC');
   }
 
@@ -584,6 +595,11 @@ export class SceneView {
   setObjectDepth(name: string, depth: number, provenance: DepthProvenance = { kind: 'default', detail: 'unspecified' }): void {
     const target = findNamedObject(this.state.objects.values(), name);
     const stored = target ? setStateDepth(this.state, target.name, depth, provenance) : setStateDepth(this.state, name, depth, provenance);
+    if (stored.name.toUpperCase() === 'MAINHERO' && (stored.kind ?? 'Object') === 'Object') {
+      this.heroDepth = stored.depth;
+      this.hero.zIndex = pixiDepthIndex(stored.depth);
+      return;
+    }
     const object = stored.kind === 'Active' || stored.kind === 'Light' ? undefined : this.objects.get(stored.name);
     if (object) { object.depth = stored.depth; object.sprite.zIndex = pixiDepthIndex(stored.depth); }
   }
@@ -663,9 +679,6 @@ export class SceneView {
     }
     this.scrollX = updateScroll(this.scrollX, this.heroPosition[0], this.mask.width, VIEWPORT_WIDTH);
     this.root.x = -this.scrollX;
-    // Mask+Focus depth follows the logical position and is refreshed every tick.
-    this.heroDepth = depthAt(this.mask, Math.round(this.heroPosition[0]), Math.round(this.heroPosition[1]), this.focus);
-    this.hero.zIndex = pixiDepthIndex(this.heroDepth);
     // Pixi renders children in the sorted array order, ascending zIndex.
     this.world.sortChildren();
     } finally { this.insideTick = false; }
@@ -733,6 +746,7 @@ export class SceneView {
       this.hero.x = this.heroPosition[0];
       this.hero.y = this.heroPosition[1];
       this.hero.scale.set(this.scaleHere());
+      this.updateHeroNavigationDepth();
       this.traceVisual('Mainhero', this.hero, `Stop${this.heroDirection}`, 1, 'navigation-update');
       return;
     }
@@ -753,6 +767,7 @@ export class SceneView {
     this.hero.x = this.heroPosition[0];
     this.hero.y = this.heroPosition[1];
     this.hero.scale.set(this.scaleHere());
+    this.updateHeroNavigationDepth();
     const current = this.player.currentLocomotion ?? `Walk${this.heroDirection}`;
     this.traceVisual('Mainhero', this.hero, current, this.player.state(current)?.frame ?? 1, 'navigation-update');
     movement.lastTime = elapsedNow;
@@ -1025,7 +1040,7 @@ export class SceneView {
       hero: {
         x: this.heroPosition[0], y: this.heroPosition[1], depth: this.heroDepth,
         absDepth: Math.abs(this.heroDepth), zIndex: this.hero.zIndex, drawIndex: heroIndex,
-        origin: 'mask(x,y)+Focus',
+        origin: depthOriginLabel(findNamedObject(this.state.objects.values(), 'Mainhero')?.depthProvenance),
       },
       objects,
       skippedMultOnly: [...this.skippedMultRecords].sort(),
