@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /** Level3 StartW concurrency, real pickups, old-save restore, and portal re-entry. */
 import { installE2EAudioPolicy } from './e2e-audio-policy.mjs';
 const cdp=(process.env.E2E_CDP??'http://127.0.0.1:9222').replace(/\/$/,'');
@@ -22,7 +23,7 @@ async function activeClick(name){const p=await evaluate(`(()=>{const v=window.__
 const view=`(()=>{const v=window.__sccDebug.view();return{scene:v.definition.id,scrollX:v.scrollX,initialized:v.state.initialized,interface:v.state.objects.get('Interface')?.state,busy:v.scc.busy,moving:v.moving,inventory:[...v.scc.inventory],kSlip:v.player.state('K_slip'),programs:v.scc.programs.map(p=>({active:p.active,waiting:p.waiting,waitName:p.waitName,pc:p.pc,commands:p.program.commands}))}})()`;
 const state=`(()=>{const v=window.__sccDebug.view();return{scene:v.definition.id,initialized:v.state.initialized,interface:v.state.objects.get('Interface')?.state,inventory:[...v.scc.inventory],objects:[...v.state.objects.values()]}})()`;
 try {
-  await send('Page.enable');await send('Page.bringToFront');await installE2EAudioPolicy(send);await send('Runtime.enable');await send('Page.navigate',{url});
+  await send('Page.enable');await send('Page.bringToFront');await installE2EAudioPolicy(send);await send('Runtime.enable');await send('Page.navigate',{url});await skipStartupVideo(send,evaluate);
   await waitFor('initial scene debug API',async()=>await evaluate('Boolean(window.__sccDebug?.view())'));
   await evaluate("window.__sccDebug.session.request(3,-1,'debug')");
   await waitFor('Level3 StartW K_slip',async()=>{const v=await evaluate(view);return v.scene===3&&v.programs.some(p=>p.active&&p.waiting&&p.waitName==='K_slip')?v:false});

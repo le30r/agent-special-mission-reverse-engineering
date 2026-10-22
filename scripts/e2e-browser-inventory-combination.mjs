@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /**
  * Chromium E2E: collect the original Level1 crowbar and Level38 knife, combine
  * them through the inventory UI, and use item 39 on Lora's door.
@@ -165,6 +166,7 @@ try {
   await installE2EAudioPolicy(send);
   await send('Runtime.enable');
   await send('Page.navigate', { url: startUrl });
+  await skipStartupVideo(send,evaluate);
   let text = await waitFor('initial Level1 panel', async () => {
     const current = await panel();
     return current.includes('active=1') && current.includes('Goto_5.visible=true') ? current : false;

@@ -6,6 +6,8 @@ import { declareSceneObjects } from '../src/scene/scene-session';
 import { applyObjectVisibility, assignImageReference } from '../src/scene/object-visibility';
 import { activeHitTest, logicalScreenPoint, worldPointFromScreen } from '../src/scene/active-hit';
 import { SccRuntime, parseScc, type SccHost } from '../src/scc/runtime';
+import { SceneView } from '../src/scene/scene-view';
+import { Texture } from 'pixi.js';
 import { collectAnimationExternalPaths } from '../src/scene/scene-source';
 import { catalogDefinition, loadTestSceneCatalog, type TestSceneCatalog } from './helpers/scene-catalog';
 
@@ -87,6 +89,50 @@ describe('SCC Show/Hide/Setzon/SclipW parsing and execution', () => {
     expect(runtime.programs[0].active).toBe(false);
     // A later Start event now sees State Slip 1 and runs its Case 1.
     expect(runtime.dispatch('Start')).toBe(true);
+  });
+
+  it('holds the whole SceneView tick behind the session-global video barrier and resumes exactly once', () => {
+    let videoActive = false;
+    const begins: Array<[string, number]> = [];
+    const state = new SceneLoader().state(1);
+    const minimalDefinition = { ...definition(1), layout: [], objects: new Map(), active: new Map(), lights: new Map(), animations: new Map() } as SceneDefinition;
+    const view = new SceneView(minimalDefinition, state, Texture.EMPTY, {
+      level: () => {}, lstate: () => {}, setZone: () => {},
+      beginVideo: (file, ignoredSccArg) => { begins.push([file, ignoredSccArg]); videoActive = true; },
+      videoActive: () => videoActive,
+    }, []);
+    try {
+      expect(view.dispatchInit()).toBe(true);
+      expect(begins).toEqual([['Rolik1.avi', 0]]);
+      expect(view.scc.programs.find((program) => program.active)).toBeTruthy();
+      view.tick(2_000, 2_000, 1);
+      expect(view.scc.states.get('Slip')).toBeUndefined();
+      expect(view.state.objects.has('Slip')).toBe(false);
+      videoActive = false;
+      view.tick(1, 1, 2);
+      expect(view.state.objects.get('Slip')?.state).toBe(1);
+      view.tick(1, 2, 3);
+      expect(view.state.objects.get('Slip')?.state).toBe(1);
+    } finally { view.dispose(); }
+  });
+
+  it('preserves the mandatory first yield when a missing-video result is synchronous', () => {
+    const source = 'Click 0 Demo Demo\n{\n Case 0\n  SclipW 7 absent.avi\n  State Tail 1\n Break\n}';
+    const state = new SceneLoader().state(1);
+    const events: string[] = [];
+    const host: SccHost = {
+      ...testHost(state, events),
+      beginVideo: (file, arg) => events.push(`begin:${file}:${arg}`),
+      videoActive: () => false,
+    };
+    const runtime = new SccRuntime(source, host);
+    runtime.click('Demo');
+    expect(events).toEqual(['begin:absent.avi:7']);
+    expect(runtime.states.get('Tail')).toBeUndefined();
+    runtime.tick();
+    expect(runtime.states.get('Tail')).toBe(1);
+    runtime.tick();
+    expect(runtime.states.get('Tail')).toBe(1);
   });
 
   it('dispatches Show/Hide to object names and skips missing names silently', () => {

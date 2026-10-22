@@ -145,7 +145,7 @@ routes are byte-identical. “Research ready” is separate from that status.
 | **Block** |23/13|**UNSUPPORTED**|**yes**|CONFIRMED|Plane + map gating, separate busy |
 | **Setzon** |15/14|**PARTIAL, wrong abstraction**|**yes**|CONFIRMED|replace zone int with map availability |
 | **Setbck** |6/3|**UNSUPPORTED**|**yes**|CONFIRMED|background wrapper/cache replacement |
-| SclipW |5/4|**PARTIAL, one-poll stub**|yes, AUDIO_RUNTIME|CONFIRMED|real video completion barrier |
+| SclipW |5/4|**SUPPORTED, prepared AVI + global media barrier**|yes, VIDEO_RUNTIME|CONFIRMED|Native EXE/Windows parity still requires Windows run |
 | **Shift** |5/3|**UNSUPPORTED**|**yes**|CONFIRMED|absolute camera target, 10 px/update |
 | **StatrW** |5/3|**UNSUPPORTED spelling**|**yes, alias**|CONFIRMED hash/branch; DERIVED equivalence|same StartW |
 | **Setbcr** |2/1|UNSUPPORTED token|**yes, ignored natively**|CONFIRMED branch; DERIVED traversal|do not alias to Setbck |

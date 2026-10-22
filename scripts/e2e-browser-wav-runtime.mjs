@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /** Deterministic scheduler fixtures with actual corpus WAVs and real Chromium Web Audio.
  * Uses a disposable target; never installs the E2E mute hook or disables autoplay.
  */
@@ -35,6 +36,7 @@ try {
   };
   await page.send('Page.enable');
   await page.send('Page.navigate', { url });
+  await skipStartupVideo(page.send, evaluate);
   const deadline = Date.now() + 30000;
   while (!(await evaluate('!!window.__audioDebug?.view()'))) {
     if (Date.now() > deadline) throw new Error('Scene boot timed out');

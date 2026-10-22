@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /** Real SCC State creation, strict restore, and optional unmodified user-save imports. */
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -58,6 +59,7 @@ try {
   await send('Page.enable');
   await send('Runtime.enable');
   await send('Page.navigate', { url });
+  await skipStartupVideo(send,evaluate);
   await waitFor('initial session', () => evaluate('window.__saveLoadDebug?.canSave().ok'));
   await evaluate("window.__sccDebug.session.request(24, -1, 'debug')");
   await waitFor('Level24 ready', () => evaluate('window.__sccDebug.view()?.definition.id === 24 && window.__saveLoadDebug.canSave().ok'));

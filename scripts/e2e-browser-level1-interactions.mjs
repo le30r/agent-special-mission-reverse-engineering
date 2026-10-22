@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /**
  * Real Chromium E2E for the Level1 pistol and hammock (Slip) interactions.
  * Connects to an already-running CDP endpoint, sends real mouse input, reads the
@@ -168,6 +169,7 @@ try {
     AudioBufferSourceNode.prototype.stop = function(...args) { record('source.stop', { contextState: this.context.state }); return stop.apply(this, args); };
   })();` });
   await send('Page.navigate', { url: startUrl });
+  await skipStartupVideo(send,evaluate);
   let text = await waitFor('initial Level1 panel', async () => {
     const current = await panel();
     return current.includes('SCENE DEBUG · active=1') && current.includes('Goto_5.visible=true') ? current : false;

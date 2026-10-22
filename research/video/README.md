@@ -187,3 +187,36 @@ flowchart TD
 Настоящие visual timing, A/V sync, пропуск при разных Windows codecs,
 смешивание звука и ошибочные COM-пути требуют реального Windows-run.
 Контракт Luna: [LUNA_SPEC](LUNA_SPEC.md).
+
+## Реализация браузерного порта (2026-10-22)
+
+- `pnpm prepare:assets` запускает `scripts/prepare-video.mjs`. Источник — read-only
+  `agent-original/extracted/Data/*.avi`; conversion output/manifest — ignored
+  `public/generated/video/`. Manifest сохраняет case-insensitive original filename,
+  source SHA-256, исходные и prepared duration/dimensions/fps/audio/video metadata.
+  Изменённые или повреждённые outputs перекодируются; валидные неизменённые
+  outputs проверяются и переиспользуются. Ошибка одного оригинала перечисляется
+  с диагностикой, пустой MP4 не создаётся, подготовка завершается ненулевым кодом.
+- Все шесть роликов конвертированы в H.264/yuv420p + AAC MP4 (`faststart`), без
+  scaling, `-r` или `-shortest`; кадры/FPS/duration проверяются относительно
+  исходного probe. Chromium фактически декодировал все шесть originals; Rolik2
+  имеет 400×300, 10 fps и 59.4 s. Для Rolik2 Chromium также показал рост
+  `webkitAudioDecodedByteCount` 6051→19200 во время playback.
+- Session-owned `VideoPlaybackController` держит один HTMLVideoElement, embedded
+  audio, manifest/request generation, listeners и terminal result. Scene tick и
+  игровое elapsed время заморожены на global barrier; resume/tail идёт только
+  следующим обычным SCC poll. `ended`, F1/any key, left-down, load/decode error и
+  lifecycle cancellation заканчивают playback идемпотентно. F1/input поглощаются,
+  map/save не открываются, media time не сериализуется. Browser mixing policy:
+  embedded video audio воспроизводится на штатной громкости параллельно с уже
+  активными WAV; подтверждения native duck/stop нет.
+- Chromium script: `pnpm e2e:browser:all e2e-browser-video.mjs`. Он прогоняет
+  Level1/Rolik1, реальную Level34→Per_plat→Knopka→Rolik2 natural end + exact
+  State/Lstate tail, F1 replay, SCC Rolik5/Final, direct Title/Titres playback,
+  missing/corrupt media, double completion и scene-switch cleanup. Это browser
+  evidence, не запуск Agent.exe.
+- Ограничения: браузерный shell не имеет native startup/menu UI, поэтому Title и
+  Titres проверены через тот же controller, но не через оригинальные UI callers.
+  `Egame` после Final остаётся отдельной неподдержанной командой. Windows
+  A/V-sync, физически слышимый output, смешивание с музыкой, native skip timing и
+  COM failure parity не проверялись.

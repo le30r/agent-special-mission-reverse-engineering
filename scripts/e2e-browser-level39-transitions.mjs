@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { resources } from './lib/e2e-resources.mjs';
+import { skipStartupVideo } from './e2e-video-helpers.mjs';
 /**
  * Real Chromium E2E for Level39 -> Level40 and Level39 -> Level47.
  *
@@ -114,6 +115,7 @@ try {
   await installE2EAudioPolicy(send);
   await send('Runtime.enable');
   await send('Page.navigate', { url: startUrl });
+  await skipStartupVideo(send,evaluate);
   await waitForPanel('active=1');
   await waitForPanel('init=[1:1]');
   await evaluate("document.getElementById('debug-scene-39').click()");
