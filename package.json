@@ -15,6 +15,7 @@
     "test:watch": "vitest",
     "e2e:browser:wav": "node scripts/e2e-browser-wav-runtime.mjs",
     "e2e:browser": "node scripts/e2e-browser-transition.mjs",
+    "e2e:browser:map": "node scripts/e2e-browser-all.mjs e2e-browser-map.mjs",
     "e2e:browser:interactions": "node scripts/e2e-browser-level1-interactions.mjs",
     "e2e:browser:columns": "node scripts/e2e-level39-columns.mjs",
     "e2e:browser:scene38": "node scripts/e2e-browser-scene38.mjs",
