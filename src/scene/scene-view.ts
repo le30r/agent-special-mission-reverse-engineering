@@ -37,6 +37,8 @@ export type SceneViewHooks = {
   setMap?(bank: number): void;
   /** State-only lookup that must not allocate an unvisited target scene. */
   readState?(scene: number, name: string): number;
+  beginVideo?(file: string, ignoredSccArg: number): void;
+  videoActive?(): boolean;
 };
 
 /**
@@ -161,6 +163,8 @@ export class SceneView {
           depthProvenance: { kind: 'default', detail: 'State-created object' },
         });
       },
+      beginVideo: (file, ignoredSccArg) => hooks.beginVideo?.(file, ignoredSccArg),
+      videoActive: () => hooks.videoActive?.() ?? false,
     }, inventory);
     this.createLayoutObjects();
     this.applyStoredObjectVisuals();
@@ -628,6 +632,8 @@ export class SceneView {
 
   /** One game tick for the active scene; ordering mirrors the current engine loop. */
   tick(deltaMS: number, elapsedNow: number, tickNumber: number): void {
+    // The original global multimedia gate freezes game time while media A/V runs.
+    if (this.scc.videoActive()) return;
     this.insideTick = true;
     try {
     this.tickNumber = tickNumber;
