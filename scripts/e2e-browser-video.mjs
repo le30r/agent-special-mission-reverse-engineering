@@ -44,6 +44,24 @@ async function key(key, code) {
   await send('Input.dispatchKeyEvent', { type: 'rawKeyDown', key, code, windowsVirtualKeyCode: key === 'F1' ? 112 : undefined });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key, code, windowsVirtualKeyCode: key === 'F1' ? 112 : undefined });
 }
+async function assertVideoFillsCanvas(label) {
+  const bounds = await evaluate(`(()=>{
+    const rect=element=>{const r=element.getBoundingClientRect();return {left:r.left,top:r.top,width:r.width,height:r.height}};
+    return {canvas:rect(document.querySelector('canvas')),panel:rect(document.querySelector('.original-video-panel')),video:rect(window.__videoDebug.controller.element)};
+  })()`);
+  for (const name of ['panel', 'video']) {
+    for (const axis of ['left', 'top', 'width', 'height']) {
+      if (Math.abs(bounds[name][axis] - bounds.canvas[axis]) > 1) {
+        throw new Error(`${label}: ${name} does not fill the canvas: ${JSON.stringify(bounds)}`);
+      }
+    }
+  }
+  console.log(`${label}: video fills canvas ${JSON.stringify(bounds.canvas)}`);
+}
+async function resizeViewport(width, height) {
+  await send('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: 1, mobile: false });
+  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))');
+}
 async function logicalClick(x, y) {
   const rect = await evaluate(`(()=>{const r=document.querySelector('canvas').getBoundingClientRect();return{left:r.left,top:r.top,width:r.width,height:r.height}})()`);
   const clientX = rect.left + (x + 0.5) * rect.width / 800;
@@ -89,11 +107,16 @@ try {
   const firstFrame = await evaluate(`new Promise(resolve=>{const v=window.__videoDebug.controller.element; if(!v)return resolve(null); v.requestVideoFrameCallback((now,meta)=>resolve({width:v.videoWidth,height:v.videoHeight,time:v.currentTime,mediaTime:meta.mediaTime})); setTimeout(()=>resolve(null),8000)})`);
   if (!firstFrame || firstFrame.width !== 400 || firstFrame.height !== 300) throw new Error(`Rolik1 did not decode a 400x300 frame: ${JSON.stringify(firstFrame)}`);
   console.log(`Rolik1 actual decoded frame ${JSON.stringify(firstFrame)}`);
+  await assertVideoFillsCanvas('Startup video');
   await key('F1', 'F1');
   await waitFor('Rolik1 F1 skip completion', () => evaluate("!window.__videoDebug.controller.active && window.__videoDebug.controller.result?.result==='skipped'"));
   await waitFor('Level1 post-video Init', () => evaluate("window.__sccDebug.view()?.state.objects.get('Slip')?.state===1"));
 
+  await resizeViewport(1280, 900);
   await startLevel34();
+  await assertVideoFillsCanvas('Next video after idle resize');
+  await resizeViewport(1100, 700);
+  await assertVideoFillsCanvas('Active video after resize');
   const gates = await evaluate('({save:window.__saveLoadDebug.canSave(),map:window.__mapDebug.view().canOpen,barrier:window.__videoDebug.session.videoBarrierActive})');
   if (gates.save.ok || gates.map || !gates.barrier) throw new Error(`video did not gate save/map/input lifecycle: ${JSON.stringify(gates)}`);
   const clip = await evaluate(`(()=>{const c=window.__videoDebug.controller,v=c.element;return{phase:c.phase,src:v.currentSrc,duration:v.duration,width:v.videoWidth,height:v.videoHeight,time:v.currentTime,audioBytes:v.webkitAudioDecodedByteCount??null,gameTime:window.__videoDebug.gameTime,tick:window.__videoDebug.tickNumber}})()`);
@@ -120,6 +143,7 @@ try {
   await evaluate("(()=>{const v=window.__sccDebug.view();v.state.objects.get('Per_plat').state=1;v.state.objects.get('Knopka').state=1})()");
   await clickTarget('Knopka', 'active');
   await waitFor('Rolik2 replay active', () => evaluate('window.__videoDebug.controller.active'));
+  await assertVideoFillsCanvas('Replay without another resize');
   await key('F1', 'F1');
   await waitFor('F1 skip and Level34 tail', () => evaluate(`(()=>{const v=window.__sccDebug.view(),c=window.__videoDebug.controller;return !c.active&&c.result?.result==='skipped'&&v.state.objects.get('Per_plat')?.state===2})()`));
   const mapPhase = await evaluate('window.__mapDebug?.view().phase');

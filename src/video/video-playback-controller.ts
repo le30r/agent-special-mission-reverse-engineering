@@ -10,6 +10,7 @@ export class VideoPlaybackController {
   private generation = 0;
   private video?: HTMLVideoElement;
   private panel?: HTMLDivElement;
+  private presentationRect?: DOMRect;
   private playButton?: HTMLButtonElement;
   private skipButton?: HTMLButtonElement;
   private listeners: Array<() => void> = [];
@@ -71,6 +72,7 @@ export class VideoPlaybackController {
   skip(): void { if (this.active) this.finish('skipped', this.generation); }
 
   position(rect: DOMRect): void {
+    this.presentationRect = rect;
     if (!this.panel) return;
     Object.assign(this.panel.style, { left: `${rect.left}px`, top: `${rect.top}px`, width: `${rect.width}px`, height: `${rect.height}px` });
   }
@@ -161,6 +163,8 @@ export class VideoPlaybackController {
     panel.append(actions);
     this.host.append(panel);
     this.panel = panel; this.playButton = play; this.skipButton = skip;
+    // A new panel must inherit the canvas bounds even without a window resize.
+    if (this.presentationRect) this.position(this.presentationRect);
   }
 
   private showRecoveryControls(): void {
