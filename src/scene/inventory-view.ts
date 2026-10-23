@@ -129,11 +129,15 @@ export class InventoryView {
     return selectedItem;
   }
 
+  /** The open panel is modal; the closed tab occludes scene hover and clicks. */
+  capturesPointer(x: number, y: number): boolean {
+    return this.open || (x >= TAB.x && x <= TAB.x + TAB.width && y >= TAB.y && y <= TAB.y + TAB.height);
+  }
+
   /** Raw logical screen click; mutates the existing SceneLoader inventory array. */
   pointerDown(x: number, y: number, inventory: number[], sceneSelectedItem = 0): InventoryPointerResult {
+    if (!this.capturesPointer(x, y)) return { handled: false };
     if (!this.open) {
-      const insideTab = x >= TAB.x && x <= TAB.x + TAB.width && y >= TAB.y && y <= TAB.y + TAB.height;
-      if (!insideTab) return { handled: false };
       if (sceneSelectedItem > 0) return { handled: true, cancelSceneSelection: true };
       this.setOpen(true);
       this.pendingSelection = 0;

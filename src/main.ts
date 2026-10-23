@@ -285,7 +285,7 @@ async function main() {
     debugPanel?.update();
     view?.tick(dt, elapsedNow, tickNumber);
     cursorView.update(view, pointerX, pointerY, dt,
-      !inventoryView.open && !saveLoadView.isOpen && !session.videoBarrierActive && !session.isRestoring);
+      !inventoryView.capturesPointer(pointerX, pointerY) && !saveLoadView.isOpen && !session.videoBarrierActive && !session.isRestoring);
     app.canvas.style.cursor = cursorView.root.visible ? 'none' : canvasCursor;
     if (view && !session.videoActive) session.markPostTick();
     if (depthPanel) depthPanel.textContent = view?.depthReport() ?? 'DEPTH DEBUG · no active scene';

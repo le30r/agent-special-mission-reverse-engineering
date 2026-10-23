@@ -26,6 +26,34 @@ function selectSlot(view: InventoryView, inventory: number[], ordinal: number) {
 }
 
 describe('InventoryView native two-phase item selection', () => {
+  it.each([[690, 566], [740, 580], [790, 594]])('occludes scene hover and clicks on the inventory tab at (%i, %i)', (x, y) => {
+    const view = inventoryView([]);
+
+    expect(view.capturesPointer(x, y)).toBe(true);
+    expect(view.open).toBe(false);
+    expect(view.pointerDown(x, y, [])).toEqual({ handled: true });
+    expect(view.open).toBe(true);
+  });
+
+  it.each([[689, 580], [791, 580], [740, 565], [740, 595]])('leaves scene hover and clicks available outside the closed tab at (%i, %i)', (x, y) => {
+    const view = inventoryView([]);
+
+    expect(view.capturesPointer(x, y)).toBe(false);
+    expect(view.pointerDown(x, y, [])).toEqual({ handled: false });
+    expect(view.open).toBe(false);
+  });
+
+  it('occludes the scene everywhere while open, including the click that closes the panel', () => {
+    const view = inventoryView([]);
+    open(view, []);
+
+    expect(view.capturesPointer(100, 300)).toBe(true);
+    expect(view.capturesPointer(600, 300)).toBe(true);
+    expect(view.pointerDown(100, 300, [])).toEqual({ handled: true, selectedItem: 0 });
+    expect(view.capturesPointer(100, 300)).toBe(false);
+    expect(view.capturesPointer(740, 580)).toBe(true);
+  });
+
   it('keeps the panel open after first selection and leaves the inventory unchanged', () => {
     const inventory = [5, 2];
     const view = inventoryView(inventory);
